@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "dgSpecHash": "elF8HevDC6Y=",
+  "success": true,
+  "projectFilePath": "D:\\GitHub\\PawelBRT\\DeeJay-Mix-Tags\\DeeJayMixTags\\DeeJayMixTags.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\PawelBryndza\\.nuget\\packages\\microsoft.net.illink.tasks\\10.0.5\\microsoft.net.illink.tasks.10.0.5.nupkg.sha512",
+    "C:\\Users\\PawelBryndza\\.nuget\\packages\\newtonsoft.json\\13.0.3\\newtonsoft.json.13.0.3.nupkg.sha512",
+    "C:\\Users\\PawelBryndza\\.nuget\\packages\\taglibsharp\\2.3.0\\taglibsharp.2.3.0.nupkg.sha512",
+    "C:\\Users\\PawelBryndza\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\10.0.5\\microsoft.aspnetcore.app.runtime.win-x64.10.0.5.nupkg.sha512",
+    "C:\\Users\\PawelBryndza\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\10.0.5\\microsoft.windowsdesktop.app.runtime.win-x64.10.0.5.nupkg.sha512",
+    "C:\\Users\\PawelBryndza\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\10.0.5\\microsoft.netcore.app.runtime.win-x64.10.0.5.nupkg.sha512"
+  ],
+  "logs": []
+}

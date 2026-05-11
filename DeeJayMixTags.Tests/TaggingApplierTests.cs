@@ -1,0 +1,167 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using TagLib.Id3v2;
+
+namespace Mp3TaggerGUI.Tests;
+
+public class TaggingApplierTests
+{
+    [Fact]
+    public void ApplyGenreUpdate_DryRun_UpdatesOutputWithoutTouchingFile()
+    {
+        var flags = new TaggingOptions
+        {
+            DoGenre = true,
+            DryRun = true,
+            PrependNew = true,
+            Dedup = true,
+            AlwaysAppendToGenre = true
+        };
+
+        var changed = TaggingApplier.ApplyGenreUpdate(
+            file: null!,
+            flags,
+            genresFromDb: new List<string> { "Trance" },
+            beforeGenres: "House",
+            out var afterGenres);
+
+        Assert.True(changed);
+        Assert.Equal("Trance | House | DJPromo.pl", afterGenres);
+    }
+
+    [Fact]
+    public void ApplyGenreUpdate_ReturnsFalse_WhenDoGenreDisabled()
+    {
+        var flags = new TaggingOptions
+        {
+            DoGenre = false,
+            DryRun = true
+        };
+
+        var changed = TaggingApplier.ApplyGenreUpdate(
+            file: null!,
+            flags,
+            genresFromDb: new List<string> { "Trance" },
+            beforeGenres: "House",
+            out var afterGenres);
+
+        Assert.False(changed);
+        Assert.Equal("House", afterGenres);
+    }
+
+    [Fact]
+    public void ApplyGenreUpdate_NoChange_WhenMergedResultEqualsBefore()
+    {
+        var flags = new TaggingOptions
+        {
+            DoGenre = true,
+            DryRun = true,
+            Dedup = true,
+            PrependNew = true,
+            AlwaysAppendToGenre = false
+        };
+
+        var changed = TaggingApplier.ApplyGenreUpdate(
+            file: null!,
+            flags,
+            genresFromDb: new List<string> { "House" },
+            beforeGenres: "House",
+            out var afterGenres);
+
+        Assert.False(changed);
+        Assert.Equal("House", afterGenres);
+    }
+
+    [Fact]
+    public void ApplyLabelUpdate_DryRun_UpdatesOutputWithoutTouchingFileOrFrames()
+    {
+        var flags = new TaggingOptions
+        {
+            DoLabel = true,
+            DryRun = true,
+            PrependNew = true,
+            Dedup = true,
+            WriteTxxxLabel = true
+        };
+
+        var changed = TaggingApplier.ApplyLabelUpdate(
+            file: null!,
+            id3v2: null!,
+            flags,
+            labelsFromDb: new List<string> { "Armada" },
+            beforeLabel: "Spinnin",
+            out var afterLabel);
+
+        Assert.True(changed);
+        Assert.Equal("Armada | Spinnin", afterLabel);
+    }
+
+    [Fact]
+    public void ApplyLabelUpdate_ReturnsFalse_WhenNoChange()
+    {
+        var flags = new TaggingOptions
+        {
+            DoLabel = true,
+            DryRun = true,
+            PrependNew = true,
+            Dedup = true
+        };
+
+        var changed = TaggingApplier.ApplyLabelUpdate(
+            file: null!,
+            id3v2: null!,
+            flags,
+            labelsFromDb: new List<string> { "Sony" },
+            beforeLabel: "Sony",
+            out var afterLabel);
+
+        Assert.False(changed);
+        Assert.Equal("Sony", afterLabel);
+    }
+
+    [Fact]
+    public void ApplyLabelUpdate_WritesPublisherAndTxxx_WhenNotDryRun()
+    {
+        using var fakeFile = new FakeTagFile("A", "T", "", "House", "Old");
+
+        var flags = new TaggingOptions
+        {
+            DoLabel = true,
+            DryRun = false,
+            PrependNew = true,
+            Dedup = true,
+            WriteTxxxLabel = true
+        };
+
+        var changed = TaggingApplier.ApplyLabelUpdate(
+            file: fakeFile,
+            id3v2: fakeFile.Id3v2,
+            flags,
+            labelsFromDb: new List<string> { "Armada" },
+            beforeLabel: "Old",
+            out var afterLabel);
+
+        Assert.True(changed);
+        Assert.Equal("Armada | Old", afterLabel);
+        Assert.Equal("Armada | Old", fakeFile.Tag.Publisher);
+
+        var frame = fakeFile.Id3v2.GetFrames<UserTextInformationFrame>()
+            .FirstOrDefault(f => string.Equals(f.Description, "LABEL", StringComparison.OrdinalIgnoreCase));
+
+        Assert.NotNull(frame);
+        Assert.Equal("Armada | Old", frame!.Text.FirstOrDefault());
+    }
+
+    [Fact]
+    public void CreateRecord_MapsValues()
+    {
+        var record = TaggingApplier.CreateRecord(ChangeKind.Updated, "G1", "G2", "L1", "L2");
+
+        Assert.Equal(ChangeKind.Updated, record.Kind);
+        Assert.Equal("G1", record.BeforeGenre);
+        Assert.Equal("G2", record.AfterGenre);
+        Assert.Equal("L1", record.BeforeLabel);
+        Assert.Equal("L2", record.AfterLabel);
+    }
+}
