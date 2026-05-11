@@ -560,7 +560,7 @@ public class TaggingLogicIntegrationTests
                             var array = JArray.Parse(backupJson);
 
                             // Should have exactly one entry (first file was processed before cancellation)
-                            Assert.Equal(1, array.Count);
+                            Assert.Single(array);
                         }
                         finally
                         {
