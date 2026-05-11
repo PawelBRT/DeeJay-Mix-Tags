@@ -21,11 +21,20 @@ namespace Mp3TaggerGUI
         public static string Norm(string? s) =>
             string.IsNullOrWhiteSpace(s) ? "" : Regex.Replace(s.Trim(), @"\s+", " ");
 
-        public static List<string> SplitMulti(string raw)
+        public static List<string> SplitMulti(string raw, TaggingOptions? options = null)
         {
             if (string.IsNullOrWhiteSpace(raw)) return [];
             var s = Norm(raw);
-            s = s.Replace("/", "|").Replace(";", "|").Replace(":", "|").Replace(",", "|");
+
+            options ??= new TaggingOptions();
+
+            // If NormalizeSeparators is enabled, convert /, ;, :, , to |
+            if (options.NormalizeSeparators)
+            {
+                s = s.Replace("/", "|").Replace(";", "|").Replace(":", "|").Replace(",", "|");
+            }
+
+            // Always split by | (application separator)
             return s.Split('|').Select(Norm).Where(p => p.Length > 0).ToList();
         }
 
@@ -51,7 +60,7 @@ namespace Mp3TaggerGUI
         public static List<string> CleanGenreList(string? raw, TaggingOptions? options = null)
         {
             options ??= new TaggingOptions();
-            var parts = SplitMulti(raw ?? "");
+            var parts = SplitMulti(raw ?? "", options);
             var outList = new List<string>();
 
             foreach (var it in parts)
@@ -80,7 +89,7 @@ namespace Mp3TaggerGUI
         public static List<string> CleanLabelList(string? raw, TaggingOptions? options = null)
         {
             options ??= new TaggingOptions();
-            var parts = SplitMulti(raw ?? "").Select(p => Regex.Replace(p, @"\.$", "").Trim()).ToList();
+            var parts = SplitMulti(raw ?? "", options).Select(p => Regex.Replace(p, @"\.$", "").Trim()).ToList();
             parts = parts.Select(p => TitleToken(p, false, options.TitleCase)).ToList();
             return Dedup(parts.Where(x => !string.IsNullOrWhiteSpace(x)).ToList());
         }

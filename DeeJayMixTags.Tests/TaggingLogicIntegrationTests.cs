@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using Newtonsoft.Json.Linq;
 using IOFile = System.IO.File;
 
 namespace Mp3TaggerGUI.Tests;
@@ -502,12 +503,28 @@ public class TaggingLogicIntegrationTests
                     {
                         var root = CreateTempDirectory();
                         var jsonPath = Path.Combine(root, "db.json");
-                        IOFile.WriteAllText(jsonPath, "[{\"artist\":\"Artist\",\"title\":\"Song\",\"version\":\"\",\"genres\":\"Trance\",\"labels\":\"Armada\"}]");
+                        IOFile.WriteAllText(jsonPath, "[{\"artist\":\"Artist\",\"title\":\"Song1\",\"version\":\"\",\"genres\":\"Trance\",\"labels\":\"Armada\"},{\"artist\":\"Artist\",\"title\":\"Song2\",\"version\":\"\",\"genres\":\"House\",\"labels\":\"Sony\"},{\"artist\":\"Artist\",\"title\":\"Song3\",\"version\":\"\",\"genres\":\"Techno\",\"labels\":\"Stil\"}]");
 
-                        var filePath = Path.Combine(root, "Artist - Song.mp3");
-                        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+                        var filePath1 = Path.Combine(root, "Artist - Song1.mp3");
+                        var filePath2 = Path.Combine(root, "Artist - Song2.mp3");
+                        var filePath3 = Path.Combine(root, "Artist - Song3.mp3");
+                        IOFile.WriteAllBytes(filePath1, new byte[] { 0x00 });
+                        IOFile.WriteAllBytes(filePath2, new byte[] { 0x00 });
+                        IOFile.WriteAllBytes(filePath3, new byte[] { 0x00 });
 
                         using var cts = new CancellationTokenSource();
+                        var processedCount = 0;
+                        var fileFactory = new Func<string, TagLib.File>(path =>
+                        {
+                            processedCount++;
+                            if (processedCount == 2)
+                            {
+                                // After first file processed, cancel for second file
+                                cts.Cancel();
+                                throw new IOException("Simulated I/O error to trigger cancellation");
+                            }
+                            return new FakeTagFile("Artist", path.Contains("Song1") ? "Song1" : path.Contains("Song2") ? "Song2" : "Song3", "", "Trance", "Armada");
+                        });
 
                         try
                         {
@@ -515,24 +532,35 @@ public class TaggingLogicIntegrationTests
                             {
                                 WriteCsvReport = false,
                                 DryRun = false,
-                                WritePerFileBackup = true
+                                WritePerFileBackup = true,
+                                DoGenre = true,
+                                DoLabel = true
                             };
-
-                            cts.Cancel();
 
                             Assert.Throws<OperationCanceledException>(() =>
                                 TaggingLogic.ProcessCore(
                                     reportRoot: root,
                                     jsonPath: jsonPath,
                                     flags: options,
-                                    files: new[] { filePath },
-                                    fileFactory: _ => new FakeTagFile("A", "T", "", "G", "L"),
+                                    files: new[] { filePath1, filePath2, filePath3 },
+                                    fileFactory: fileFactory,
                                     cancellationToken: cts.Token));
 
-                            // Verify backup file was created and properly closed (can be opened without locks)
+                            // Verify backup file was created with exactly one entry (first file before cancellation)
                             var backupFiles = Directory.GetFiles(root, "_tagger_backup_*.json");
-                            // Even if empty, file should exist or not exist without I/O locks
-                            Assert.True(backupFiles.Length >= 0);
+                            Assert.Single(backupFiles);
+
+                            var backupPath = backupFiles[0];
+                            var backupJson = IOFile.ReadAllText(backupPath);
+
+                            // Verify JSON is properly closed (ends with ])
+                            Assert.EndsWith("]", backupJson.Trim());
+
+                            // Parse and verify it's valid JSON
+                            var array = JArray.Parse(backupJson);
+
+                            // Should have exactly one entry (first file was processed before cancellation)
+                            Assert.Equal(1, array.Count);
                         }
                         finally
                         {

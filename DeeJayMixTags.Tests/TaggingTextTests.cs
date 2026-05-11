@@ -93,4 +93,54 @@ public class TaggingTextTests
         Assert.Equal("My Song", title);
         Assert.Equal("Extended Mix", version);
     }
+
+    [Fact]
+    public void SplitMulti_WithNormalizeSeparatorsTrue_SplitsAllSeparators()
+    {
+        var options = new TaggingOptions { NormalizeSeparators = true };
+        var result = TaggingText.SplitMulti("House, Techno / Pop; Trance: Dance", options);
+
+        // Should split by /, ;, :, ,
+        Assert.Equal(new List<string> { "House", "Techno", "Pop", "Trance", "Dance" }, result);
+    }
+
+    [Fact]
+    public void SplitMulti_WithNormalizeSeparatorsFalse_DoesNotSplitOnSpecialChars()
+    {
+        var options = new TaggingOptions { NormalizeSeparators = false };
+        var result = TaggingText.SplitMulti("House, Techno / Pop", options);
+
+        // Should keep as single value because / ; : , are not split
+        Assert.Equal(new List<string> { "House, Techno / Pop" }, result);
+    }
+
+    [Fact]
+    public void SplitMulti_WithNormalizeSeparatorsFalse_StillSplitsOnAppSeparator()
+    {
+        var options = new TaggingOptions { NormalizeSeparators = false };
+        var result = TaggingText.SplitMulti("House | Techno | Pop", options);
+
+        // Should still split by | (app separator)
+        Assert.Equal(new List<string> { "House", "Techno", "Pop" }, result);
+    }
+
+    [Fact]
+    public void CleanGenreList_WithNormalizeSeparatorsFalse_PreservesSingleValue()
+    {
+        var options = new TaggingOptions { NormalizeSeparators = false, TitleCase = true };
+        var result = TaggingText.CleanGenreList("House, Techno / Pop", options);
+
+        // Should treat whole thing as single genre value
+        Assert.Equal(new List<string> { "House, Techno / Pop" }, result);
+    }
+
+    [Fact]
+    public void CleanLabelList_WithNormalizeSeparatorsTrue_SplitsAndTitleCases()
+    {
+        var options = new TaggingOptions { NormalizeSeparators = true, TitleCase = true };
+        var result = TaggingText.CleanLabelList("sony / armada; spinnin", options);
+
+        // Should split and title case each
+        Assert.Equal(new List<string> { "Sony", "Armada", "Spinnin" }, result);
+    }
 }
