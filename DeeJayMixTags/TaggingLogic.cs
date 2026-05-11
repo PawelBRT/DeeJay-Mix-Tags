@@ -52,67 +52,87 @@ namespace Mp3TaggerGUI
 
             var openFile = fileFactory ?? TagLib.File.Create;
             var res = new Result { Total = fileList.Count };
-            var csv = flags.WriteCsvReport ? new TaggingCsvWriter(Path.Combine(reportRoot, "_tagger_report.csv")) : null;
-            var backup = (!flags.DryRun && flags.WritePerFileBackup)
-                ? new TaggingBackupWriter(Path.Combine(reportRoot, $"_tagger_backup_{DateTime.Now:yyyyMMdd_HHmmss}.json"))
-                : null;
 
-            foreach (var path in fileList)
+            TaggingCsvWriter? csv = null;
+            TaggingBackupWriter? backup = null;
+
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                csv = flags.WriteCsvReport ? new TaggingCsvWriter(Path.Combine(reportRoot, "_tagger_report.csv")) : null;
+                backup = (!flags.DryRun && flags.WritePerFileBackup)
+                    ? new TaggingBackupWriter(Path.Combine(reportRoot, $"_tagger_backup_{DateTime.Now:yyyyMMdd_HHmmss}.json"))
+                    : null;
 
-                try
+                foreach (var path in fileList)
                 {
-                    var r = ProcessOneWithRetry(path, db, flags, onLog, openFile, cancellationToken);
-                    switch (r.Kind)
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    try
                     {
-                        case ChangeKind.Updated: res.Updated++; break;
-                        case ChangeKind.Unchanged: res.Unchanged++; break;
-                        case ChangeKind.Missing: res.Missing++; break;
+                        var r = ProcessOneWithRetry(path, db, flags, onLog, openFile, cancellationToken);
+                        switch (r.Kind)
+                        {
+                            case ChangeKind.Updated: res.Updated++; break;
+                            case ChangeKind.Unchanged: res.Unchanged++; break;
+                            case ChangeKind.Missing: res.Missing++; break;
+                        }
+
+                        csv?.WriteRow(r, path);
+                        if (r.Kind == ChangeKind.Updated)
+                            backup?.WriteRow(path, r.BeforeGenre, r.BeforeLabel, r.AfterGenre, r.AfterLabel);
                     }
-
-                    csv?.WriteRow(r, path);
-                    if (r.Kind == ChangeKind.Updated)
-                        backup?.WriteRow(path, r.BeforeGenre, r.BeforeLabel, r.AfterGenre, r.AfterLabel);
+                    catch (Exception ex)
+                    {
+                        res.Errors++;
+                        onLog?.Invoke($"ERROR: {Path.GetFileName(path)} -> {ex.Message}");
+                        csv?.WriteError(path, ex.Message);
+                    }
+                    finally { onStep?.Invoke(); }
                 }
-                catch (Exception ex)
+
+                onLog?.Invoke("");
+                onLog?.Invoke("--- PODSUMOWANIE ---");
+                onLog?.Invoke($"Plików MP3: {res.Total}");
+                onLog?.Invoke($"Zaktualizowano: {res.Updated}");
+                onLog?.Invoke($"Bez zmian: {res.Unchanged}");
+                onLog?.Invoke($"Brak w bazie: {res.Missing}");
+                onLog?.Invoke($"Błędy: {res.Errors}");
+
+                return res;
+            }
+            finally
+            {
+                if (csv != null)
                 {
-                    res.Errors++;
-                    onLog?.Invoke($"ERROR: {Path.GetFileName(path)} -> {ex.Message}");
-                    csv?.WriteError(path, ex.Message);
+                    try
+                    {
+                        res.CsvPath = csv.Path;
+                        csv.Dispose();
+                        onLog?.Invoke($"Raport CSV: {csv.Path}");
+                    }
+                    catch { }
                 }
-                finally { onStep?.Invoke(); }
+
+                if (backup != null)
+                {
+                    try
+                    {
+                        backup.Dispose();
+                        onLog?.Invoke($"Backup sesji: {backup.Path}");
+                    }
+                    catch { }
+                }
             }
-
-            onLog?.Invoke("");
-            onLog?.Invoke("--- PODSUMOWANIE ---");
-            onLog?.Invoke($"Plików MP3: {res.Total}");
-            onLog?.Invoke($"Zaktualizowano: {res.Updated}");
-            onLog?.Invoke($"Bez zmian: {res.Unchanged}");
-            onLog?.Invoke($"Brak w bazie: {res.Missing}");
-            onLog?.Invoke($"Błędy: {res.Errors}");
-
-            if (csv != null)
-            {
-                res.CsvPath = csv.Path;
-                csv.Dispose();
-                onLog?.Invoke($"Raport CSV: {csv.Path}");
-            }
-
-            if (backup != null)
-            {
-                backup.Dispose();
-                onLog?.Invoke($"Backup sesji: {backup.Path}");
-            }
-
-            return res;
         }
 
-        private static Dictionary<(string a, string t, string v), (List<string> genres, List<string> labels)> LoadDatabase(string jsonPath)
+        private static Dictionary<(string a, string t, string v), (string genres, string labels)> LoadDatabase(string jsonPath)
         {
+            if (string.IsNullOrWhiteSpace(jsonPath) || !IOFile.Exists(jsonPath))
+                return new();
+
             var text = IOFile.ReadAllText(jsonPath);
             var arr = JArray.Parse(text);
-            var map = new Dictionary<(string, string, string), (List<string>, List<string>)>();
+            var map = new Dictionary<(string, string, string), (string, string)>();
 
             foreach (var it in arr)
             {
@@ -122,19 +142,16 @@ namespace Mp3TaggerGUI
                 string genres = (string?)it["genres"] ?? "";
                 string labels = (string?)it["labels"] ?? "";
 
-                var gList = TaggingText.CleanGenreList(genres);
-                var lList = TaggingText.CleanLabelList(labels);
-
-                map[(artist, title, version)] = (gList, lList);
+                map[(artist, title, version)] = (genres, labels);
                 if (!string.IsNullOrEmpty(version))
-                    map.TryAdd((artist, title, ""), (gList, lList));
+                    map.TryAdd((artist, title, ""), (genres, labels));
             }
             return map;
         }
 
         private static ChangeRecord ProcessOneWithRetry(
             string path,
-            Dictionary<(string a, string t, string v), (List<string> genres, List<string> labels)> db,
+            Dictionary<(string a, string t, string v), (string genres, string labels)> db,
             TaggingOptions flags,
             Action<string>? onLog,
             Func<string, TagLib.File> fileFactory,
@@ -171,13 +188,14 @@ namespace Mp3TaggerGUI
 
         private static ChangeRecord ProcessOne(
             string path,
-            Dictionary<(string a, string t, string v), (List<string> genres, List<string> labels)> db,
+            Dictionary<(string a, string t, string v), (string genres, string labels)> db,
             TaggingOptions flags,
             Action<string>? onLog,
             Func<string, TagLib.File> fileFactory)
         {
             using var file = fileFactory(path);
-            var id3v2 = (TagLib.Id3v2.Tag)file.GetTag(TagTypes.Id3v2, true);
+            var id3v2 = file.GetTag(TagTypes.Id3v2, true) as TagLib.Id3v2.Tag;
+
 
             var (artist, title, version) = TaggingText.ExtractArtistTitleVersion(file);
 

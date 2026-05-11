@@ -36,7 +36,7 @@ namespace Mp3TaggerGUI
 
         readonly CheckBox chkRemoveWorldPoland = new() { Text = "Usuń 'Świat/Polska' z GENRE", AutoSize = true, Checked = true };
         readonly CheckBox chkAppendDjPromo     = new() { Text = "Dopnij 'DJPromo.pl' na końcu GENRE", AutoSize = true, Checked = true };
-        readonly CheckBox chkWriteTxxx         = new() { Text = "Dopnij 'DJPromo' na końcu TXXX:LABEL", AutoSize = true, Checked = true };
+        readonly CheckBox chkWriteTxxx         = new() { Text = "Dopnij 'DJPromo.pl' na końcu TXXX:LABEL", AutoSize = true, Checked = true };
         readonly CheckBox chkDryRun            = new() { Text = "Dry run (bez zapisu plików)", AutoSize = true };
 
         // CSV/Backup
@@ -143,7 +143,7 @@ namespace Mp3TaggerGUI
             tip.SetToolTip(chkForcePopUpper, "Wymusza zapis 'POP' wielkimi literami w GENRE.");
             tip.SetToolTip(chkRemoveWorldPoland, "Z GENRE usuń wpisy 'Świat'/'Polska' i prefiksy 'Świat:'/'Polska:'.");
             tip.SetToolTip(chkAppendDjPromo, "Jeśli w GENRE brak 'DJPromo.pl', dopnij go na końcu (stały sufiks).");
-            tip.SetToolTip(chkWriteTxxx, "Dopnij 'DJ Promo' na koncu TXXX:LABLE (kopiuj TPUB → TXXX).");
+            tip.SetToolTip(chkWriteTxxx, "Dopisuje/aktualizuje TXXX:LABEL wartością z pola LABEL (TPUB).");
             tip.SetToolTip(chkDryRun, "Tryb testowy: nie zapisuje zmian w plikach, tylko loguje co by się zmieniło.");
             tip.SetToolTip(chkCsvReport, "Zapisuje raport CSV (_tagger_report.csv) w folderze MP3 z listą zmian.");
             tip.SetToolTip(chkPerFileBackup, "Przed zapisem tworzy jeden wspólny backup sesji: _tagger_backup_YYYYMMDD_HHMMSS.json.");

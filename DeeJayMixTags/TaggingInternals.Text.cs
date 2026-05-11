@@ -29,10 +29,12 @@ namespace Mp3TaggerGUI
             return s.Split('|').Select(Norm).Where(p => p.Length > 0).ToList();
         }
 
-        public static string TitleToken(string tok, bool forcePopUpper)
+        public static string TitleToken(string tok, bool forcePopUpper, bool applyTitleCase = true)
         {
             if (string.IsNullOrWhiteSpace(tok)) return tok ?? "";
             if (forcePopUpper && tok.Equals("POP", StringComparison.OrdinalIgnoreCase)) return "POP";
+
+            if (!applyTitleCase) return tok;
 
             var words = tok.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             for (int i = 0; i < words.Length; i++)
@@ -46,26 +48,40 @@ namespace Mp3TaggerGUI
             return string.Join(' ', words);
         }
 
-        public static List<string> CleanGenreList(string? raw)
+        public static List<string> CleanGenreList(string? raw, TaggingOptions? options = null)
         {
+            options ??= new TaggingOptions();
             var parts = SplitMulti(raw ?? "");
             var outList = new List<string>();
 
             foreach (var it in parts)
             {
-                var it2 = Regex.Replace(it, @"^(Świat|Swiat|Polska)\s*:\s*", "", RegexOptions.IgnoreCase);
-                if (DropInGenre.Contains(it2)) continue;
-                it2 = TitleToken(it2, true);
+                var it2 = it;
+
+                // Remove prefix like "Świat:" or "Polska:"
+                if (options.RemoveWorldPoland)
+                {
+                    it2 = Regex.Replace(it2, @"^(Świat|Swiat|Polska)\s*:\s*", "", RegexOptions.IgnoreCase);
+                }
+
+                // Remove standalone "Świat" or "Polska"
+                if (options.RemoveWorldPoland && DropInGenre.Contains(it2))
+                    continue;
+
+                // Apply title case
+                it2 = TitleToken(it2, options.ForcePopUpper, options.TitleCase);
+
                 if (!string.IsNullOrWhiteSpace(it2)) outList.Add(it2);
             }
 
             return Dedup(outList);
         }
 
-        public static List<string> CleanLabelList(string? raw)
+        public static List<string> CleanLabelList(string? raw, TaggingOptions? options = null)
         {
+            options ??= new TaggingOptions();
             var parts = SplitMulti(raw ?? "").Select(p => Regex.Replace(p, @"\.$", "").Trim()).ToList();
-            parts = parts.Select(p => TitleToken(p, false)).ToList();
+            parts = parts.Select(p => TitleToken(p, false, options.TitleCase)).ToList();
             return Dedup(parts.Where(x => !string.IsNullOrWhiteSpace(x)).ToList());
         }
 

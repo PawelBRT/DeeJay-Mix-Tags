@@ -12,9 +12,9 @@ namespace Mp3TaggerGUI
             string artist,
             string title,
             string version,
-            Dictionary<(string a, string t, string v), (List<string> genres, List<string> labels)> db,
+            Dictionary<(string a, string t, string v), (string genres, string labels)> db,
             bool allowFilenameFallback,
-            out (List<string> genres, List<string> labels) info)
+            out (string genres, string labels) info)
         {
             if (db.TryGetValue((artist, title, version), out info) || db.TryGetValue((artist, title, ""), out info))
                 return true;
@@ -27,8 +27,8 @@ namespace Mp3TaggerGUI
 
         private static bool TryGetInfoFromFilename(
             string path,
-            Dictionary<(string a, string t, string v), (List<string> genres, List<string> labels)> db,
-            out (List<string> genres, List<string> labels) info)
+            Dictionary<(string a, string t, string v), (string genres, string labels)> db,
+            out (string genres, string labels) info)
         {
             var baseName = Path.GetFileNameWithoutExtension(path);
             var trimmed = Regex.Replace(baseName, "_\\w{1,12}$", "");

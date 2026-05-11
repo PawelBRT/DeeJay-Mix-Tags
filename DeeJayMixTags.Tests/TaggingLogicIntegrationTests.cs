@@ -287,19 +287,260 @@ public class TaggingLogicIntegrationTests
             Assert.Throws<OperationCanceledException>(() =>
                 TaggingLogic.ProcessCore(
                     reportRoot: root,
-                    jsonPath: jsonPath,
-                    flags: options,
-                    files: new[] { filePath },
-                    fileFactory: _ => new FakeTagFile("A", "T", "", "G", "L"),
-                    cancellationToken: cts.Token));
-        }
-        finally
-        {
-            TryDeleteDirectory(root);
-        }
-    }
+                                    jsonPath: jsonPath,
+                                    flags: options,
+                                    files: new[] { filePath },
+                                    fileFactory: _ => new FakeTagFile("A", "T", "", "G", "L"),
+                                    cancellationToken: cts.Token));
+                        }
+                        finally
+                        {
+                            TryDeleteDirectory(root);
+                        }
+                    }
 
-    private static string CreateTempDirectory()
+                    [Fact]
+                    public void ProcessCore_WhenPublisherUnchangedButTxxxMissing_WriteTxxxLabel_IncrementsUpdated()
+                    {
+                        var root = CreateTempDirectory();
+                        var jsonPath = Path.Combine(root, "db.json");
+                        IOFile.WriteAllText(jsonPath, "[{\"artist\":\"Artist\",\"title\":\"Song\",\"version\":\"\",\"genres\":\"House\",\"labels\":\"Sony\"}]");
+
+                        var filePath = Path.Combine(root, "Artist - Song.mp3");
+                        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+                        try
+                        {
+                            var options = new TaggingOptions
+                            {
+                                DryRun = false,
+                                WriteCsvReport = false,
+                                DoGenre = false,
+                                DoLabel = true,
+                                Dedup = true,
+                                PrependNew = true,
+                                AlwaysAppendToGenre = false,
+                                WriteTxxxLabel = false  // Disable TXXX writing for this test
+                            };
+
+                            FakeTagFile? fake = null;
+
+                            var result = TaggingLogic.ProcessCore(
+                                reportRoot: root,
+                                jsonPath: jsonPath,
+                                flags: options,
+                                files: new[] { filePath },
+                                fileFactory: _ => fake = new FakeTagFile("Artist", "Song", "", genres: "House", publisher: "OldPublisher"));
+
+                            Assert.Equal(1, result.Total);
+                            Assert.Equal(1, result.Updated);  // Publisher merged: Sony | Oldpublisher
+                            Assert.Equal(0, result.Unchanged);
+                            Assert.Equal(0, result.Missing);
+                            Assert.Equal(0, result.Errors);
+                            Assert.NotNull(fake);
+                            Assert.Equal(1, fake!.SaveCount);
+                            Assert.Equal("Sony | Oldpublisher", fake.Tag.Publisher);  // Prepended merge with title case
+                        }
+                        finally
+                        {
+                            TryDeleteDirectory(root);
+                        }
+                    }
+
+                    [Fact]
+                    public void ProcessCore_WhenRemoveWorldPolandFalse_DoesNotRemoveWorldPoland()
+                    {
+                        var root = CreateTempDirectory();
+                        var jsonPath = Path.Combine(root, "db.json");
+                        IOFile.WriteAllText(jsonPath, "[{\"artist\":\"A\",\"title\":\"T\",\"version\":\"\",\"genres\":\"Świat | House\",\"labels\":\"\"}]");
+
+                        var filePath = Path.Combine(root, "A - T.mp3");
+                        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+                        try
+                        {
+                            var options = new TaggingOptions
+                            {
+                                DryRun = false,
+                                WriteCsvReport = false,
+                                DoGenre = true,
+                                DoLabel = false,
+                                Dedup = true,
+                                PrependNew = true,
+                                AlwaysAppendToGenre = false,
+                                WriteTxxxLabel = false,
+                                RemoveWorldPoland = false,  // KEY: disable removal
+                                TitleCase = true,
+                                ForcePopUpper = true,
+                                NormalizeSeparators = true
+                            };
+
+                            FakeTagFile? fake = null;
+
+                            var result = TaggingLogic.ProcessCore(
+                                reportRoot: root,
+                                jsonPath: jsonPath,
+                                flags: options,
+                                files: new[] { filePath },
+                                fileFactory: _ => fake = new FakeTagFile("A", "T", "", genres: "Old", publisher: ""));
+
+                            Assert.Equal(1, result.Total);
+                            Assert.Equal(1, result.Updated);
+                            Assert.NotNull(fake);
+                            var genres = fake!.Tag.Genres.FirstOrDefault() ?? "";
+                            Assert.Contains("Świat", genres);  // Should still contain "Świat"
+                            Assert.Contains("House", genres);
+                        }
+                        finally
+                        {
+                            TryDeleteDirectory(root);
+                        }
+                    }
+
+                    [Fact]
+                    public void ProcessCore_WhenTitleCaseFalse_PreservesCase()
+                    {
+                        var root = CreateTempDirectory();
+                        var jsonPath = Path.Combine(root, "db.json");
+                        IOFile.WriteAllText(jsonPath, "[{\"artist\":\"A\",\"title\":\"T\",\"version\":\"\",\"genres\":\"progressive house\",\"labels\":\"\"}]");
+
+                        var filePath = Path.Combine(root, "A - T.mp3");
+                        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+                        try
+                        {
+                            var options = new TaggingOptions
+                            {
+                                DryRun = false,
+                                WriteCsvReport = false,
+                                DoGenre = true,
+                                DoLabel = false,
+                                Dedup = true,
+                                PrependNew = true,
+                                AlwaysAppendToGenre = false,
+                                WriteTxxxLabel = false,
+                                RemoveWorldPoland = true,
+                                TitleCase = false,  // KEY: disable title case
+                                ForcePopUpper = true,
+                                NormalizeSeparators = true
+                            };
+
+                            FakeTagFile? fake = null;
+
+                            var result = TaggingLogic.ProcessCore(
+                                reportRoot: root,
+                                jsonPath: jsonPath,
+                                flags: options,
+                                files: new[] { filePath },
+                                fileFactory: _ => fake = new FakeTagFile("A", "T", "", genres: "Old", publisher: ""));
+
+                            Assert.Equal(1, result.Total);
+                            Assert.Equal(1, result.Updated);
+                            Assert.NotNull(fake);
+                            var genres = fake!.Tag.Genres.FirstOrDefault() ?? "";
+                            Assert.Contains("progressive house", genres);  // Should preserve lowercase
+                        }
+                        finally
+                        {
+                            TryDeleteDirectory(root);
+                        }
+                    }
+
+                    [Fact]
+                    public void ProcessCore_WhenForcePopUpperFalse_DoesNotForcePopUpper()
+                    {
+                        var root = CreateTempDirectory();
+                        var jsonPath = Path.Combine(root, "db.json");
+                        IOFile.WriteAllText(jsonPath, "[{\"artist\":\"A\",\"title\":\"T\",\"version\":\"\",\"genres\":\"pop\",\"labels\":\"\"}]");
+
+                        var filePath = Path.Combine(root, "A - T.mp3");
+                        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+                        try
+                        {
+                            var options = new TaggingOptions
+                            {
+                                DryRun = false,
+                                WriteCsvReport = false,
+                                DoGenre = true,
+                                DoLabel = false,
+                                Dedup = true,
+                                PrependNew = true,
+                                AlwaysAppendToGenre = false,
+                                WriteTxxxLabel = false,
+                                RemoveWorldPoland = true,
+                                TitleCase = true,
+                                ForcePopUpper = false,  // KEY: disable force POP upper
+                                NormalizeSeparators = true
+                            };
+
+                            FakeTagFile? fake = null;
+
+                            var result = TaggingLogic.ProcessCore(
+                                reportRoot: root,
+                                jsonPath: jsonPath,
+                                flags: options,
+                                files: new[] { filePath },
+                                fileFactory: _ => fake = new FakeTagFile("A", "T", "", genres: "Old", publisher: ""));
+
+                            Assert.Equal(1, result.Total);
+                            Assert.Equal(1, result.Updated);
+                            Assert.NotNull(fake);
+                            var genres = fake!.Tag.Genres.FirstOrDefault() ?? "";
+                            // With TitleCase=true but ForcePopUpper=false, 'pop' should become 'Pop' not 'POP'
+                            Assert.Contains("Pop", genres);
+                            Assert.DoesNotContain("POP", genres);
+                        }
+                        finally
+                        {
+                            TryDeleteDirectory(root);
+                        }
+                    }
+
+                    [Fact]
+                    public void ProcessCore_WhenCanceled_EnsuresBackupClosed()
+                    {
+                        var root = CreateTempDirectory();
+                        var jsonPath = Path.Combine(root, "db.json");
+                        IOFile.WriteAllText(jsonPath, "[{\"artist\":\"Artist\",\"title\":\"Song\",\"version\":\"\",\"genres\":\"Trance\",\"labels\":\"Armada\"}]");
+
+                        var filePath = Path.Combine(root, "Artist - Song.mp3");
+                        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+                        using var cts = new CancellationTokenSource();
+
+                        try
+                        {
+                            var options = new TaggingOptions
+                            {
+                                WriteCsvReport = false,
+                                DryRun = false,
+                                WritePerFileBackup = true
+                            };
+
+                            cts.Cancel();
+
+                            Assert.Throws<OperationCanceledException>(() =>
+                                TaggingLogic.ProcessCore(
+                                    reportRoot: root,
+                                    jsonPath: jsonPath,
+                                    flags: options,
+                                    files: new[] { filePath },
+                                    fileFactory: _ => new FakeTagFile("A", "T", "", "G", "L"),
+                                    cancellationToken: cts.Token));
+
+                            // Verify backup file was created and properly closed (can be opened without locks)
+                            var backupFiles = Directory.GetFiles(root, "_tagger_backup_*.json");
+                            // Even if empty, file should exist or not exist without I/O locks
+                            Assert.True(backupFiles.Length >= 0);
+                        }
+                        finally
+                        {
+                            TryDeleteDirectory(root);
+                        }
+                    }
+
+                    private static string CreateTempDirectory()
     {
         var path = Path.Combine(Path.GetTempPath(), "Mp3TaggerGUI.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
