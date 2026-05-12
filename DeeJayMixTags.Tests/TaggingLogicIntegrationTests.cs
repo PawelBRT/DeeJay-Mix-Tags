@@ -568,6 +568,256 @@ public class TaggingLogicIntegrationTests
                         }
                     }
 
+                    [Fact]
+                    public void LoadGridRowsCore_WhenEntryExists_ReturnsEditableSuggestedValues()
+                    {
+                        var root = CreateTempDirectory();
+                        var jsonPath = Path.Combine(root, "db.json");
+                        IOFile.WriteAllText(jsonPath, "[{\"artist\":\"Artist\",\"title\":\"Song\",\"version\":\"\",\"genres\":\"House\",\"labels\":\"Sony\"}]");
+
+                        var filePath = Path.Combine(root, "Artist - Song.mp3");
+                        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+                        try
+                        {
+                            var options = new TaggingOptions
+                            {
+                                DoGenre = true,
+                                DoLabel = true,
+                                PrependNew = true,
+                                Dedup = true,
+                                AlwaysAppendToGenre = false,
+                                WriteTxxxLabel = false
+                            };
+
+                            var rows = TaggingLogic.LoadGridRowsCore(
+                                jsonPath: jsonPath,
+                                flags: options,
+                                files: new[] { filePath },
+                                fileFactory: _ => new FakeTagFile("Artist", "Song", "", genres: "Old", publisher: "OldLabel"));
+
+                            var row = Assert.Single(rows);
+                            Assert.True(row.Apply);
+                            Assert.Equal("Artist - Song.mp3", row.FileName);
+                            Assert.Equal("Artist", row.Artist);
+                            Assert.Equal("Song", row.Title);
+                            Assert.Equal("Old", row.CurrentGenre);
+                            Assert.Equal("House | Old", row.Genre);
+                            Assert.Equal("OldLabel", row.CurrentLabel);
+                            Assert.Equal("Sony | Oldlabel", row.Label);
+                            Assert.Equal("Do zapisu", row.Status);
+                        }
+                        finally
+                        {
+                            TryDeleteDirectory(root);
+                        }
+                    }
+
+    [Fact]
+    public void ApplyGridRowsCore_WithEditedRow_WritesManualValues()
+                    {
+                        var root = CreateTempDirectory();
+                        var filePath = Path.Combine(root, "Artist - Song.mp3");
+                        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+                        try
+                        {
+                            var options = new TaggingOptions
+                            {
+                                DoGenre = true,
+                                DoLabel = true,
+                                DryRun = false,
+                                WriteCsvReport = false,
+                                WritePerFileBackup = false,
+                                WriteTxxxLabel = false,
+                                NormalizeSeparators = true,
+                                TitleCase = true
+                            };
+
+                            var row = new TagEditRow
+                            {
+                                Apply = true,
+                                FilePath = filePath,
+                                FileName = "Artist - Song.mp3",
+                                Album = "New Album",
+                                Year = "2026",
+                                Track = "7",
+                                Bpm = "124",
+                                Key = "8A",
+                                Comment = "Grid note",
+                                Genre = "tech house",
+                                Label = "manual label"
+                            };
+
+                            FakeTagFile? fake = null;
+                            var result = TaggingLogic.ApplyGridRowsCore(
+                                reportRoot: root,
+                                rows: new[] { row },
+                                flags: options,
+                                fileFactory: _ => fake = new FakeTagFile("Artist", "Song", "", genres: "Old", publisher: "OldLabel"));
+
+                            Assert.Equal(1, result.Total);
+                            Assert.Equal(1, result.Updated);
+                            Assert.Equal(0, result.Errors);
+                            Assert.NotNull(fake);
+                            Assert.Equal(1, fake!.SaveCount);
+                            Assert.Equal("New Album", fake.Tag.Album);
+                            Assert.Equal((uint)2026, fake.Tag.Year);
+                            Assert.Equal((uint)7, fake.Tag.Track);
+                            Assert.Equal((uint)124, fake.Tag.BeatsPerMinute);
+                            Assert.Equal("8A", fake.Tag.InitialKey);
+                            Assert.Equal("Grid note", fake.Tag.Comment);
+                            Assert.Equal("Tech House", fake.Tag.Genres.Single());
+                            Assert.Equal("Manual Label", fake.Tag.Publisher);
+                            Assert.Equal("Zapisano", row.Status);
+                            Assert.Equal("New Album", row.CurrentAlbum);
+                            Assert.Equal("2026", row.CurrentYear);
+                            Assert.Equal("7", row.CurrentTrack);
+                            Assert.Equal("124", row.CurrentBpm);
+                            Assert.Equal("8A", row.CurrentKey);
+                            Assert.Equal("Grid note", row.CurrentComment);
+                            Assert.Equal("Tech House", row.CurrentGenre);
+                            Assert.Equal("Manual Label", row.CurrentLabel);
+                        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void ProcessCore_DjoidSource_WithGenreModeConfigured_UpdatesGenreEvenWhenDoGenreFalse()
+    {
+        var root = CreateTempDirectory();
+        var jsonPath = Path.Combine(root, "db.json");
+        IOFile.WriteAllText(jsonPath, """
+        [
+          {
+            "key": "DJSAPP",
+            "value": {
+              "tracks": {
+                "tracksByIds": {
+                  "id-1": {
+                    "artist": ["Artist"],
+                    "title": "Song (Club Mix)",
+                    "genres": ["house"],
+                    "subgenres": ["tech house"]
+                  }
+                }
+              }
+            }
+          }
+        ]
+        """);
+
+        var filePath = Path.Combine(root, "Artist - Song.mp3");
+        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+        try
+        {
+            var options = new TaggingOptions
+            {
+                DataSource = TagDataSource.DjoidJson,
+                DoGenre = false,
+                DoLabel = false,
+                DryRun = false,
+                WriteCsvReport = false,
+                DjoidGenreSource = DjoidGenreSource.GenreAndSubgenre,
+                DjoidGenreWriteMode = GenreWriteMode.Replace,
+                TitleCase = true,
+                NormalizeSeparators = true,
+                Dedup = true
+            };
+
+            FakeTagFile? fake = null;
+            var result = TaggingLogic.ProcessCore(
+                reportRoot: root,
+                jsonPath: jsonPath,
+                flags: options,
+                files: new[] { filePath },
+                fileFactory: _ => fake = new FakeTagFile("Artist", "Song", "Club Mix", genres: "Old", publisher: "L"));
+
+            Assert.Equal(1, result.Total);
+            Assert.Equal(1, result.Updated);
+            Assert.NotNull(fake);
+            Assert.Equal("House | Tech House", fake!.Tag.Genres.Single());
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void ProcessCore_DjoidSource_WithGenreModeNone_DoesNotUpdateGenre()
+    {
+        var root = CreateTempDirectory();
+        var jsonPath = Path.Combine(root, "db.json");
+        IOFile.WriteAllText(jsonPath, """
+        [
+          {
+            "key": "DJSAPP",
+            "value": {
+              "tracks": {
+                "tracksByIds": {
+                  "id-1": {
+                    "artist": ["Artist"],
+                    "title": "Song (Club Mix)",
+                    "genres": ["house"],
+                    "subgenres": ["tech house"]
+                  }
+                }
+              }
+            }
+          }
+        ]
+        """);
+
+        var filePath = Path.Combine(root, "Artist - Song.mp3");
+        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+        try
+        {
+            var options = new TaggingOptions
+            {
+                DataSource = TagDataSource.DjoidJson,
+                DoGenre = true,
+                DoLabel = false,
+                DryRun = false,
+                WriteCsvReport = false,
+                DjoidGenreSource = DjoidGenreSource.None,
+                TitleCase = true,
+                NormalizeSeparators = true,
+                Dedup = true,
+                WriteDjoidGenreTag = false,
+                WriteDjoidSubgenreTag = false,
+                WriteDjoidEnergyTag = false,
+                WriteDjoidDanceabilityTag = false,
+                WriteDjoidEmotionTag = false,
+                WriteDjoidKeyTag = false,
+                WriteDjoidBpmTag = false
+            };
+
+            FakeTagFile? fake = null;
+            var result = TaggingLogic.ProcessCore(
+                reportRoot: root,
+                jsonPath: jsonPath,
+                flags: options,
+                files: new[] { filePath },
+                fileFactory: _ => fake = new FakeTagFile("Artist", "Song", "Club Mix", genres: "Old", publisher: "L"));
+
+            Assert.Equal(1, result.Total);
+            Assert.Equal(1, result.Unchanged);
+            Assert.Equal(0, result.Updated);
+            Assert.NotNull(fake);
+            Assert.Equal("Old", fake!.Tag.Genres.Single());
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
                     private static string CreateTempDirectory()
     {
         var path = Path.Combine(Path.GetTempPath(), "Mp3TaggerGUI.Tests", Guid.NewGuid().ToString("N"));

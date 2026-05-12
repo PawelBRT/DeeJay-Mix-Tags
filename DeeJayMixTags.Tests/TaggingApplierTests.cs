@@ -8,6 +8,69 @@ namespace Mp3TaggerGUI.Tests;
 public class TaggingApplierTests
 {
     [Fact]
+    public void BuildGenreValueFromDjoid_Replace_UsesConfiguredSourceOnly()
+    {
+        var flags = new TaggingOptions
+        {
+            DjoidGenreSource = DjoidGenreSource.GenreAndSubgenre,
+            DjoidGenreWriteMode = GenreWriteMode.Replace,
+            Dedup = true,
+            NormalizeSeparators = true,
+            TitleCase = true
+        };
+
+        var result = TaggingApplier.BuildGenreValueFromDjoid(
+            flags,
+            djoidGenre: "house",
+            djoidSubgenre: "tech house",
+            beforeGenres: "Old");
+
+        Assert.Equal("House | Tech House", result);
+    }
+
+    [Fact]
+    public void BuildGenreValueFromDjoid_Append_AddsAfterCurrent()
+    {
+        var flags = new TaggingOptions
+        {
+            DjoidGenreSource = DjoidGenreSource.GenreOnly,
+            DjoidGenreWriteMode = GenreWriteMode.Append,
+            Dedup = true,
+            NormalizeSeparators = true,
+            TitleCase = true
+        };
+
+        var result = TaggingApplier.BuildGenreValueFromDjoid(
+            flags,
+            djoidGenre: "house",
+            djoidSubgenre: "ignored",
+            beforeGenres: "Trance");
+
+        Assert.Equal("Trance | House", result);
+    }
+
+    [Fact]
+    public void BuildGenreValueFromDjoid_Prepend_AddsBeforeCurrent()
+    {
+        var flags = new TaggingOptions
+        {
+            DjoidGenreSource = DjoidGenreSource.SubgenreOnly,
+            DjoidGenreWriteMode = GenreWriteMode.Prepend,
+            Dedup = true,
+            NormalizeSeparators = true,
+            TitleCase = true
+        };
+
+        var result = TaggingApplier.BuildGenreValueFromDjoid(
+            flags,
+            djoidGenre: "ignored",
+            djoidSubgenre: "tech house",
+            beforeGenres: "Trance");
+
+        Assert.Equal("Tech House | Trance", result);
+    }
+
+    [Fact]
     public void ApplyGenreUpdate_DryRun_UpdatesOutputWithoutTouchingFile()
     {
         var flags = new TaggingOptions

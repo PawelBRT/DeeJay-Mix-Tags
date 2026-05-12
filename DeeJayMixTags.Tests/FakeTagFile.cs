@@ -45,6 +45,12 @@ public sealed class FakeTagFile : TagLib.File
         public string Title { get; set; } = "";
         public string[] Genres { get; set; } = Array.Empty<string>();
         public string Publisher { get; set; } = "";
+        public string Album { get; set; } = "";
+        public uint Year { get; set; }
+        public uint Track { get; set; }
+        public uint BeatsPerMinute { get; set; }
+        public string InitialKey { get; set; } = "";
+        public string Comment { get; set; } = "";
 
         public string JoinedPerformers => string.Join("; ", Performers ?? Array.Empty<string>());
 
@@ -109,6 +115,42 @@ public sealed class FakeTagFile : TagLib.File
         {
             get => _inner.Publisher;
             set => _inner.Publisher = value;
+        }
+
+        public override string Album
+        {
+            get => _inner.Album;
+            set => _inner.Album = value;
+        }
+
+        public override uint Year
+        {
+            get => _inner.Year;
+            set => _inner.Year = value;
+        }
+
+        public override uint Track
+        {
+            get => _inner.Track;
+            set => _inner.Track = value;
+        }
+
+        public override uint BeatsPerMinute
+        {
+            get => _inner.BeatsPerMinute;
+            set => _inner.BeatsPerMinute = value;
+        }
+
+        public override string InitialKey
+        {
+            get => _inner.InitialKey;
+            set => _inner.InitialKey = value;
+        }
+
+        public override string Comment
+        {
+            get => _inner.Comment;
+            set => _inner.Comment = value;
         }
 
         public override TagTypes TagTypes => TagTypes.Id3v2;
