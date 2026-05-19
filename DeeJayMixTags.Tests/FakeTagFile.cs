@@ -9,6 +9,7 @@ public sealed class FakeTagFile : TagLib.File
 {
     private readonly FakeTag _tag;
     private readonly TagAdapter _adapter;
+    private readonly TagLib.Id3v2.Tag _id3v2 = new();
 
     public FakeTagFile(string artist, string title, string version, string genres, string publisher)
         : base("fake")
@@ -30,6 +31,8 @@ public sealed class FakeTagFile : TagLib.File
 
     public override TagLib.Tag GetTag(TagTypes type, bool create)
     {
+        if ((type & TagTypes.Id3v2) != 0)
+            return _id3v2;
         return _adapter;
     }
 
@@ -38,6 +41,7 @@ public sealed class FakeTagFile : TagLib.File
     }
 
     public FakeTag Id3v2 => _tag;
+    public TagLib.Id3v2.Tag RealId3v2 => _id3v2;
 
     public sealed class FakeTag
     {

@@ -71,6 +71,77 @@ public class TaggingApplierTests
     }
 
     [Fact]
+    public void BuildCommentValue_RepairsPartialDmcAndCleansOldMetadata()
+    {
+        var flags = new TaggingOptions
+        {
+            WriteDmcComment = true,
+            RepairDmcComment = true,
+            CleanupCommentMetadata = true
+        };
+
+        var result = TaggingApplier.BuildCommentValue(
+            "11B - 122,00 - 7 | Record label: Old Label/6A | Key: 6A | Energy: 7 | Niniejszy plik zostal udostepniony",
+            flags);
+
+        Assert.StartsWith("11B - 122,00 - 7 | Niniejszy plik zostal udostepniony", result);
+        Assert.Contains("DEEJAY mix club", result);
+        Assert.DoesNotContain("Record label:", result);
+        Assert.DoesNotContain("Key:", result);
+        Assert.DoesNotContain("Energy:", result);
+    }
+
+    [Fact]
+    public void BuildDjoidCommentValue_AddsSingleDjoidBlock()
+    {
+        var flags = new TaggingOptions
+        {
+            WriteDjoidComment = true,
+            ScaleDjoidEnergyDanceToTen = true
+        };
+        var info = new TrackLookupInfo
+        {
+            DjoidDanceability = "0.44",
+            DjoidEmotion = "Happy",
+            DjoidEnergy = "0.72",
+            DjoidKey = "8A",
+            DjoidGenre = "House",
+            DjoidSubgenre = "Tech House"
+        };
+
+        var result = TaggingApplier.BuildDjoidCommentValue("User note", flags, info);
+
+        Assert.Equal("User note | DJOID: Danceability: 4, Emotion: Happy, Energy: 7, Key: 8A, Genre: House, Subgenre: Tech House", result);
+    }
+
+    [Fact]
+    public void BuildDjoidCommentValue_ReplacesExistingDjoidBlockWithoutDuplicating()
+    {
+        var flags = new TaggingOptions
+        {
+            WriteDjoidComment = true,
+            ScaleDjoidEnergyDanceToTen = true
+        };
+        var info = new TrackLookupInfo
+        {
+            DjoidEnergy = "0.8",
+            DjoidKey = "9B",
+            DjoidGenre = "Trance"
+        };
+
+        var result = TaggingApplier.BuildDjoidCommentValue(
+            "User note | DJOID: Energy: 1, Key: Old | Tail",
+            flags,
+            info);
+
+        Assert.Equal(1, result.Split("DJOID:", StringSplitOptions.None).Length - 1);
+        Assert.DoesNotContain("Key: Old", result);
+        Assert.Contains("DJOID: Energy: 8, Key: 9B, Genre: Trance", result);
+        Assert.StartsWith("User note", result);
+        Assert.Contains("Tail", result);
+    }
+
+    [Fact]
     public void ApplyGenreUpdate_DryRun_UpdatesOutputWithoutTouchingFile()
     {
         var flags = new TaggingOptions
@@ -208,6 +279,27 @@ public class TaggingApplierTests
         Assert.True(changed);
         Assert.Equal("Armada | Old", afterLabel);
         Assert.Equal("Armada | Old", fakeFile.Tag.Publisher);
+    }
+
+    [Fact]
+    public void ApplyDmcGenreTag_WritesOrUpdatesSingleTxxxFrame()
+    {
+        var id3v2 = new TagLib.Id3v2.Tag();
+        var flags = new TaggingOptions { WriteDmcGenreTag = true };
+
+        var created = TaggingApplier.ApplyDmcGenreTag(id3v2, flags, "House | DJPromo.pl");
+        var unchanged = TaggingApplier.ApplyDmcGenreTag(id3v2, flags, "House | DJPromo.pl");
+        var updated = TaggingApplier.ApplyDmcGenreTag(id3v2, flags, "Trance | DJPromo.pl");
+
+        var frames = id3v2.GetFrames<UserTextInformationFrame>()
+            .Where(f => string.Equals(f.Description, "DMC_GENRE", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.True(created);
+        Assert.False(unchanged);
+        Assert.True(updated);
+        Assert.Single(frames);
+        Assert.Equal("Trance | DJPromo.pl", frames[0].Text.FirstOrDefault());
     }
 
     [Fact]

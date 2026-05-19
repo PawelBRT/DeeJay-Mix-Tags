@@ -3,6 +3,8 @@ using System.ComponentModel;
 using System.Drawing;
 using System.Linq;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using System.Windows.Forms;
 
 namespace Mp3TaggerGUI
@@ -30,6 +32,7 @@ namespace Mp3TaggerGUI
         private readonly Button _closeButton = new() { Text = "Zamknij", Width = 100, Height = 34 };
         private readonly Button _clearFiltersButton = new() { Text = "Wyczyść filtry", Width = 130, Height = 34 };
         private readonly Button _bulkSetButton = new() { Text = "Ustaw w zazn.", Width = 120, Height = 34 };
+        private readonly Button _exportCsvButton = new() { Text = "Eksport CSV", Width = 110, Height = 34 };
         private readonly ComboBox _viewPreset = new() { Width = 120, DropDownStyle = ComboBoxStyle.DropDownList };
         private readonly CheckBox _changesOnly = new() { Text = "Changes only", AutoSize = true };
         private readonly Label _summaryLabel = new() { AutoSize = true, Text = "GRID: 0" };
@@ -60,7 +63,9 @@ namespace Mp3TaggerGUI
             _closeButton.Top = 8;
             _bulkSetButton.Left = _closeButton.Right + 8;
             _bulkSetButton.Top = 8;
-            _clearFiltersButton.Left = _bulkSetButton.Right + 8;
+            _exportCsvButton.Left = _bulkSetButton.Right + 8;
+            _exportCsvButton.Top = 8;
+            _clearFiltersButton.Left = _exportCsvButton.Right + 8;
             _clearFiltersButton.Top = 8;
             _viewPreset.Left = _clearFiltersButton.Right + 8;
             _viewPreset.Top = 10;
@@ -70,22 +75,22 @@ namespace Mp3TaggerGUI
             _summaryLabel.Top = 16;
             _summaryLabel.ForeColor = AppUiStyle.TextColor;
 
-            var lblA = new Label { Text = "Artysta", Left = 10, Top = 52, AutoSize = true };
-            _filterArtist.Left = 64; _filterArtist.Top = 48;
-            var lblT = new Label { Text = "Tytuł", Left = 204, Top = 52, AutoSize = true };
-            _filterTitle.Left = 242; _filterTitle.Top = 48;
-            var lblG = new Label { Text = "Genre", Left = 382, Top = 52, AutoSize = true };
-            _filterGenre.Left = 426; _filterGenre.Top = 48;
-            var lblL = new Label { Text = "Label", Left = 566, Top = 52, AutoSize = true };
-            _filterLabel.Left = 606; _filterLabel.Top = 48;
-            var lblB = new Label { Text = "BPM", Left = 746, Top = 52, AutoSize = true };
-            _filterBpm.Left = 782; _filterBpm.Top = 48;
-            var lblK = new Label { Text = "KEY", Left = 882, Top = 52, AutoSize = true };
-            _filterKey.Left = 918; _filterKey.Top = 48;
+            var lblA = CreateFilterLabel("Artysta", 10, 52, 46);
+            _filterArtist.Left = lblA.Right + 8; _filterArtist.Top = 48;
+            var lblT = CreateFilterLabel("Tytuł", _filterArtist.Right + 16, 52, 36);
+            _filterTitle.Left = lblT.Right + 8; _filterTitle.Top = 48;
+            var lblG = CreateFilterLabel("Genre", _filterTitle.Right + 16, 52, 42);
+            _filterGenre.Left = lblG.Right + 8; _filterGenre.Top = 48;
+            var lblL = CreateFilterLabel("Label", _filterGenre.Right + 16, 52, 40);
+            _filterLabel.Left = lblL.Right + 8; _filterLabel.Top = 48;
+            var lblB = CreateFilterLabel("BPM", _filterLabel.Right + 16, 52, 34);
+            _filterBpm.Left = lblB.Right + 8; _filterBpm.Top = 48;
+            var lblK = CreateFilterLabel("KEY", _filterBpm.Right + 16, 52, 32);
+            _filterKey.Left = lblK.Right + 8; _filterKey.Top = 48;
 
             toolbar.Controls.AddRange([
                 _saveButton, _closeButton, _bulkSetButton, _clearFiltersButton, _summaryLabel,
-                _viewPreset, _changesOnly,
+                _exportCsvButton, _viewPreset, _changesOnly,
                 lblA, _filterArtist, lblT, _filterTitle, lblG, _filterGenre, lblL, _filterLabel, lblB, _filterBpm, lblK, _filterKey
             ]);
 
@@ -100,6 +105,7 @@ namespace Mp3TaggerGUI
             _saveButton.Click += (s, e) => SaveRequested?.Invoke(this, EventArgs.Empty);
             _closeButton.Click += (s, e) => Hide();
             _bulkSetButton.Click += (s, e) => BulkSetSelected();
+            _exportCsvButton.Click += (s, e) => ExportVisibleRowsToCsv();
             _clearFiltersButton.Click += (s, e) => ClearFilters();
             _viewPreset.SelectedIndexChanged += (s, e) => ApplyPreset();
             _changesOnly.CheckedChanged += (s, e) => RebuildView();
@@ -187,6 +193,19 @@ namespace Mp3TaggerGUI
             _viewPreset.Items.AddRange(["Basic", "Extended", "DJOID"]);
             _viewPreset.SelectedIndex = 1;
         }
+
+        private static Label CreateFilterLabel(string text, int left, int top, int width) => new()
+        {
+            Text = text,
+            Left = left,
+            Top = top,
+            Width = width,
+            Height = 22,
+            AutoSize = false,
+            TextAlign = ContentAlignment.MiddleLeft,
+            BackColor = AppUiStyle.AppBackColor,
+            ForeColor = AppUiStyle.TextColor
+        };
 
         public void SetRows(BindingList<TagEditRow> rows)
         {
@@ -416,6 +435,73 @@ namespace Mp3TaggerGUI
 
             _grid.Refresh();
             UpdateSummary(_sourceRows);
+        }
+
+        private void ExportVisibleRowsToCsv()
+        {
+            if (_rows == null || _rows.Count == 0)
+                return;
+
+            using var dlg = new SaveFileDialog
+            {
+                Filter = "CSV (*.csv)|*.csv|All files (*.*)|*.*",
+                FileName = $"grid_export_{DateTime.Now:yyyyMMdd_HHmmss}.csv"
+            };
+
+            if (dlg.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            var sb = new StringBuilder();
+            var visibleColumns = _grid.Columns.Cast<DataGridViewColumn>()
+                .Where(c => c.Visible && !string.IsNullOrWhiteSpace(c.DataPropertyName))
+                .OrderBy(c => c.DisplayIndex)
+                .ToList();
+
+            sb.AppendLine(string.Join(";", visibleColumns.Select(c => EscapeCsv(c.HeaderText))));
+            foreach (var row in _rows)
+            {
+                sb.AppendLine(string.Join(";", visibleColumns.Select(c => EscapeCsv(GetExportValue(row, c.DataPropertyName)))));
+            }
+
+            File.WriteAllText(dlg.FileName, sb.ToString(), Encoding.UTF8);
+        }
+
+        private static string GetExportValue(TagEditRow row, string prop)
+        {
+            return prop switch
+            {
+                nameof(TagEditRow.Apply) => row.Apply ? "1" : "0",
+                nameof(TagEditRow.FileName) => row.FileName,
+                nameof(TagEditRow.Artist) => row.Artist,
+                nameof(TagEditRow.Title) => row.Title,
+                nameof(TagEditRow.Version) => row.Version,
+                nameof(TagEditRow.Album) => row.Album,
+                nameof(TagEditRow.Year) => row.Year,
+                nameof(TagEditRow.Track) => row.Track,
+                nameof(TagEditRow.Bpm) => row.Bpm,
+                nameof(TagEditRow.Key) => row.Key,
+                nameof(TagEditRow.Comment) => row.Comment,
+                nameof(TagEditRow.Genre) => row.Genre,
+                nameof(TagEditRow.Label) => row.Label,
+                nameof(TagEditRow.DjoidGenre) => row.DjoidGenre,
+                nameof(TagEditRow.DjoidSubgenre) => row.DjoidSubgenre,
+                nameof(TagEditRow.DjoidEnergy) => row.DjoidEnergy,
+                nameof(TagEditRow.DjoidDanceability) => row.DjoidDanceability,
+                nameof(TagEditRow.DjoidEmotion) => row.DjoidEmotion,
+                nameof(TagEditRow.DjoidKey) => row.DjoidKey,
+                nameof(TagEditRow.DjoidBpm) => row.DjoidBpm,
+                nameof(TagEditRow.Status) => row.Status,
+                nameof(TagEditRow.FilePath) => row.FilePath,
+                _ => ""
+            };
+        }
+
+        private static string EscapeCsv(string? value)
+        {
+            var s = value ?? "";
+            if (s.Contains(';') || s.Contains('"') || s.Contains('\n') || s.Contains('\r'))
+                return "\"" + s.Replace("\"", "\"\"") + "\"";
+            return s;
         }
 
         private static bool IsEditableProperty(string prop)

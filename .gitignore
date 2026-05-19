@@ -37,6 +37,9 @@ bld/
 # Test Results
 TestResults/
 
+# Build artifacts
+artifacts/
+
 # NuGet
 *.nupkg
 *.snupkg

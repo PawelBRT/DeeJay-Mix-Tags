@@ -14,6 +14,11 @@ namespace Mp3TaggerGUI
         public string AfterGenre { get; set; } = "";
         public string BeforeLabel { get; set; } = "";
         public string AfterLabel { get; set; } = "";
+        public string BeforeComment { get; set; } = "";
+        public string AfterComment { get; set; } = "";
+        public string BeforeTxxx { get; set; } = "";
+        public string AfterTxxx { get; set; } = "";
+        public string ChangedFields { get; set; } = "";
     }
 
     internal sealed class TrackLookupInfo

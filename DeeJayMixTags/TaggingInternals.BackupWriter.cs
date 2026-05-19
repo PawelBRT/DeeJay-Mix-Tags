@@ -20,14 +20,15 @@ namespace Mp3TaggerGUI
             _sw.WriteLine("[");
         }
 
-        public void WriteRow(string filePath, string beforeGenre, string beforeLabel, string afterGenre, string afterLabel)
+        public void WriteRow(ChangeRecord r, string filePath)
         {
             var obj = new
             {
                 file = filePath,
                 timestamp = DateTimeOffset.Now.ToString("o"),
-                before = new { genre = beforeGenre, label = beforeLabel },
-                after = new { genre = afterGenre, label = afterLabel }
+                changedFields = r.ChangedFields,
+                before = new { genre = r.BeforeGenre, label = r.BeforeLabel, comment = r.BeforeComment, txxx = r.BeforeTxxx },
+                after = new { genre = r.AfterGenre, label = r.AfterLabel, comment = r.AfterComment, txxx = r.AfterTxxx }
             };
 
             var json = JsonConvert.SerializeObject(obj, Formatting.Indented);

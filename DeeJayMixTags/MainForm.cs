@@ -40,6 +40,10 @@ namespace Mp3TaggerGUI
         readonly CheckBox chkRemoveWorldPoland = new() { Text = "Usuń 'Świat/Polska' z GENRE", AutoSize = true, Checked = true };
         readonly CheckBox chkAppendDjPromo     = new() { Text = "Dopnij 'DJPromo.pl' na końcu GENRE", AutoSize = true, Checked = true };
         readonly CheckBox chkWriteTxxx         = new() { Text = "Dopnij 'DJPromo.pl' na końcu TXXX:LABEL", AutoSize = true, Checked = true };
+        readonly CheckBox chkWriteDmcComment   = new() { Text = "Dopisz komentarz DMC", AutoSize = true };
+        readonly CheckBox chkRepairDmcComment  = new() { Text = "Napraw komentarz DMC", AutoSize = true };
+        readonly CheckBox chkCleanupComment    = new() { Text = "Wyczyść Record label/Key/Energy z COMMENT", AutoSize = true };
+        readonly CheckBox chkWriteDmcGenreTag  = new() { Text = "Zapisz TXXX:DMC_GENRE", AutoSize = true };
         readonly CheckBox chkDryRun            = new() { Text = "Dry run (bez zapisu plików)", AutoSize = true };
 
         // CSV/Backup
@@ -54,7 +58,8 @@ namespace Mp3TaggerGUI
         readonly CheckBox chkWriteDjoidEmotionTag = new() { Text = "EMOTION", AutoSize = true, Checked = true };
         readonly CheckBox chkWriteDjoidKeyTag = new() { Text = "KEY", AutoSize = true, Checked = true };
         readonly CheckBox chkWriteDjoidBpmTag = new() { Text = "BPM", AutoSize = true, Checked = true };
-        readonly CheckBox chkScaleDjoidToTen = new() { Text = "Skaluj energy/danceability do 1-10", AutoSize = true, Checked = true };
+        readonly CheckBox chkWriteDjoidComment = new() { Text = "Zapisz podsumowanie DJOID w COMMENT", AutoSize = true };
+        readonly CheckBox chkScaleDjoidToTen = new() { Text = "Skaluj do 1-10", AutoSize = true, Checked = true };
         readonly Label lblDjoidGenre = new() { Text = "GENRE z DJOID:", AutoSize = true, ForeColor = Color.FromArgb(45, 45, 48) };
         readonly Label lblDjoidTags = new() { Text = "Zapisz dodatkowe pola jako TXXX:DJOID_*", AutoSize = true, ForeColor = Color.FromArgb(45, 45, 48) };
 
@@ -113,19 +118,24 @@ namespace Mp3TaggerGUI
             chkFallback.Left = 14; chkFallback.Top = 58;
             chkAppendDjPromo.Left = 14; chkAppendDjPromo.Top = 88;
             chkWriteTxxx.Left = 14; chkWriteTxxx.Top = 118;
+            chkWriteDmcComment.Left = 14; chkWriteDmcComment.Top = 154;
+            chkRepairDmcComment.Left = 14; chkRepairDmcComment.Top = 184;
+            chkCleanupComment.Left = 14; chkCleanupComment.Top = 214;
+            chkWriteDmcGenreTag.Left = 14; chkWriteDmcGenreTag.Top = 244;
 
             lblDjoidGenre.Left = 14; lblDjoidGenre.Top = 28;
             cmbDjoidGenreSource.Left = 14; cmbDjoidGenreSource.Top = 52; cmbDjoidGenreSource.Width = 300;
             cmbDjoidGenreWriteMode.Left = 14; cmbDjoidGenreWriteMode.Top = 84; cmbDjoidGenreWriteMode.Width = 300;
-            chkScaleDjoidToTen.Left = 14; chkScaleDjoidToTen.Top = 120;
-            lblDjoidTags.Left = 14; lblDjoidTags.Top = 152;
-            chkWriteDjoidGenreTag.Left = 14; chkWriteDjoidGenreTag.Top = 176;
-            chkWriteDjoidSubgenreTag.Left = 120; chkWriteDjoidSubgenreTag.Top = 176;
-            chkWriteDjoidEnergyTag.Left = 245; chkWriteDjoidEnergyTag.Top = 176;
-            chkWriteDjoidDanceTag.Left = 14; chkWriteDjoidDanceTag.Top = 202;
-            chkWriteDjoidEmotionTag.Left = 150; chkWriteDjoidEmotionTag.Top = 202;
-            chkWriteDjoidKeyTag.Left = 245; chkWriteDjoidKeyTag.Top = 202;
+            lblDjoidTags.Left = 14; lblDjoidTags.Top = 126;
+            chkWriteDjoidGenreTag.Left = 14; chkWriteDjoidGenreTag.Top = 150;
+            chkWriteDjoidSubgenreTag.Left = 120; chkWriteDjoidSubgenreTag.Top = 150;
+            chkWriteDjoidEnergyTag.Left = 14; chkWriteDjoidEnergyTag.Top = 176;
+            chkWriteDjoidDanceTag.Left = 120; chkWriteDjoidDanceTag.Top = 176;
+            chkWriteDjoidEmotionTag.Left = 14; chkWriteDjoidEmotionTag.Top = 202;
+            chkWriteDjoidKeyTag.Left = 120; chkWriteDjoidKeyTag.Top = 202;
             chkWriteDjoidBpmTag.Left = 14; chkWriteDjoidBpmTag.Top = 228;
+            chkScaleDjoidToTen.Left = 120; chkScaleDjoidToTen.Top = 228;
+            chkWriteDjoidComment.Left = 14; chkWriteDjoidComment.Top = 254;
 
             chkDryRun.Left = 14; chkDryRun.Top = 28;
             chkCsvReport.Left = 14; chkCsvReport.Top = 58;
@@ -136,9 +146,11 @@ namespace Mp3TaggerGUI
             ]);
             sourceBox.Controls.AddRange([
                 chkDoLabel, chkFallback, chkAppendDjPromo, chkWriteTxxx,
+                chkWriteDmcComment, chkRepairDmcComment, chkCleanupComment, chkWriteDmcGenreTag,
                 lblDjoidGenre, cmbDjoidGenreSource, cmbDjoidGenreWriteMode, chkScaleDjoidToTen,
                 lblDjoidTags, chkWriteDjoidGenreTag, chkWriteDjoidSubgenreTag, chkWriteDjoidEnergyTag,
-                chkWriteDjoidDanceTag, chkWriteDjoidEmotionTag, chkWriteDjoidKeyTag, chkWriteDjoidBpmTag
+                chkWriteDjoidDanceTag, chkWriteDjoidEmotionTag, chkWriteDjoidKeyTag, chkWriteDjoidBpmTag,
+                chkWriteDjoidComment
             ]);
             outputBox.Controls.AddRange([chkDryRun, chkCsvReport, chkPerFileBackup]);
             grp.Controls.AddRange([commonBox, sourceBox, outputBox]);
@@ -184,6 +196,12 @@ namespace Mp3TaggerGUI
             tip.SetToolTip(chkRemoveWorldPoland, "Z GENRE usuń wpisy 'Świat'/'Polska' i prefiksy 'Świat:'/'Polska:'.");
             tip.SetToolTip(chkAppendDjPromo, "Jeśli w GENRE brak 'DJPromo.pl', dopnij go na końcu (stały sufiks).");
             tip.SetToolTip(chkWriteTxxx, "Dopisuje/aktualizuje TXXX:LABEL wartością z pola LABEL (TPUB).");
+            tip.SetToolTip(chkWriteDmcComment, "Dopisuje pełny komentarz DMC na końcu COMMENT, bez duplikowania istniejącego pełnego tekstu.");
+            tip.SetToolTip(chkRepairDmcComment, "Usuwa niepełny/stary komentarz DMC i zapisuje pełny, poprawny tekst.");
+            tip.SetToolTip(chkCleanupComment, "Czyści z COMMENT stare wpisy Record label, Key i Energy oraz porządkuje separatory.");
+            tip.SetToolTip(chkWriteDmcGenreTag, "Zapisuje kopię finalnego GENRE z DJPromo do TXXX:DMC_GENRE, jako backup przed operacją DJOID.");
+            tip.SetToolTip(chkWriteDjoidComment, "Zapisuje w COMMENT blok z wartościami DJOID: danceability, emotion, energy, key, genre i subgenre. Istniejący blok DJOID zostanie wymieniony, nie zduplikowany.");
+            tip.SetToolTip(chkScaleDjoidToTen, "Skaluje wartości DJOID energy i danceability do zakresu 1-10.");
             tip.SetToolTip(chkDryRun, "Tryb testowy: nie zapisuje zmian w plikach, tylko loguje co by się zmieniło.");
             tip.SetToolTip(chkCsvReport, "Zapisuje raport CSV (_tagger_report.csv) w folderze MP3 z listą zmian.");
             tip.SetToolTip(chkPerFileBackup, "Przed zapisem tworzy jeden wspólny backup sesji: _tagger_backup_YYYYMMDD_HHMMSS.json.");
@@ -258,6 +276,10 @@ namespace Mp3TaggerGUI
             chkWriteTxxx.Enabled = !isDjoid;
             chkFallback.Enabled = !isDjoid;
             chkAppendDjPromo.Enabled = !isDjoid;
+            chkWriteDmcComment.Enabled = !isDjoid;
+            chkRepairDmcComment.Enabled = !isDjoid;
+            chkCleanupComment.Enabled = !isDjoid;
+            chkWriteDmcGenreTag.Enabled = !isDjoid;
             chkRemoveWorldPoland.Enabled = true;
             chkNormalizeSeps.Enabled = true;
             chkTitleCase.Enabled = true;
@@ -267,6 +289,10 @@ namespace Mp3TaggerGUI
             chkWriteTxxx.Visible = !isDjoid;
             chkFallback.Visible = !isDjoid;
             chkAppendDjPromo.Visible = !isDjoid;
+            chkWriteDmcComment.Visible = !isDjoid;
+            chkRepairDmcComment.Visible = !isDjoid;
+            chkCleanupComment.Visible = !isDjoid;
+            chkWriteDmcGenreTag.Visible = !isDjoid;
 
             cmbDjoidGenreSource.Enabled = isDjoid;
             cmbDjoidGenreWriteMode.Enabled = isDjoid && cmbDjoidGenreSource.SelectedIndex != 0;
@@ -278,6 +304,7 @@ namespace Mp3TaggerGUI
             chkWriteDjoidEmotionTag.Enabled = isDjoid;
             chkWriteDjoidKeyTag.Enabled = isDjoid;
             chkWriteDjoidBpmTag.Enabled = isDjoid;
+            chkWriteDjoidComment.Enabled = isDjoid;
 
             lblDjoidGenre.Visible = isDjoid;
             lblDjoidTags.Visible = isDjoid;
@@ -291,6 +318,7 @@ namespace Mp3TaggerGUI
             chkWriteDjoidEmotionTag.Visible = isDjoid;
             chkWriteDjoidKeyTag.Visible = isDjoid;
             chkWriteDjoidBpmTag.Visible = isDjoid;
+            chkWriteDjoidComment.Visible = isDjoid;
 
             if (isDjoid)
             {
@@ -327,6 +355,10 @@ namespace Mp3TaggerGUI
             DryRun = chkDryRun.Checked,
             WriteCsvReport = chkCsvReport.Checked,
             WritePerFileBackup = chkPerFileBackup.Checked,
+            WriteDmcComment = chkWriteDmcComment.Checked,
+            RepairDmcComment = chkRepairDmcComment.Checked,
+            CleanupCommentMetadata = chkCleanupComment.Checked,
+            WriteDmcGenreTag = chkWriteDmcGenreTag.Checked,
             DjoidGenreSource = cmbDjoidGenreSource.SelectedIndex switch
             {
                 1 => DjoidGenreSource.GenreOnly,
@@ -347,6 +379,7 @@ namespace Mp3TaggerGUI
             WriteDjoidEmotionTag = chkWriteDjoidEmotionTag.Checked,
             WriteDjoidKeyTag = chkWriteDjoidKeyTag.Checked,
             WriteDjoidBpmTag = chkWriteDjoidBpmTag.Checked,
+            WriteDjoidComment = chkWriteDjoidComment.Checked,
             ScaleDjoidEnergyDanceToTen = chkScaleDjoidToTen.Checked
         };
 
@@ -671,6 +704,10 @@ namespace Mp3TaggerGUI
             chkRemoveWorldPoland.Checked = settings.RemoveWorldPoland;
             chkAppendDjPromo.Checked = settings.AlwaysAppendToGenre;
             chkWriteTxxx.Checked = settings.WriteTxxxLabel;
+            chkWriteDmcComment.Checked = settings.WriteDmcComment;
+            chkRepairDmcComment.Checked = settings.RepairDmcComment;
+            chkCleanupComment.Checked = settings.CleanupCommentMetadata;
+            chkWriteDmcGenreTag.Checked = settings.WriteDmcGenreTag;
             chkDryRun.Checked = settings.DryRun;
             chkCsvReport.Checked = settings.WriteCsvReport;
             chkPerFileBackup.Checked = settings.WritePerFileBackup;
@@ -694,6 +731,7 @@ namespace Mp3TaggerGUI
             chkWriteDjoidEmotionTag.Checked = settings.WriteDjoidEmotionTag;
             chkWriteDjoidKeyTag.Checked = settings.WriteDjoidKeyTag;
             chkWriteDjoidBpmTag.Checked = settings.WriteDjoidBpmTag;
+            chkWriteDjoidComment.Checked = settings.WriteDjoidComment;
             chkScaleDjoidToTen.Checked = settings.ScaleDjoidEnergyDanceToTen;
             RefreshSourceUi();
         }
@@ -714,6 +752,10 @@ namespace Mp3TaggerGUI
             RemoveWorldPoland = chkRemoveWorldPoland.Checked,
             AlwaysAppendToGenre = chkAppendDjPromo.Checked,
             WriteTxxxLabel = chkWriteTxxx.Checked,
+            WriteDmcComment = chkWriteDmcComment.Checked,
+            RepairDmcComment = chkRepairDmcComment.Checked,
+            CleanupCommentMetadata = chkCleanupComment.Checked,
+            WriteDmcGenreTag = chkWriteDmcGenreTag.Checked,
             DryRun = chkDryRun.Checked,
             WriteCsvReport = chkCsvReport.Checked,
             WritePerFileBackup = chkPerFileBackup.Checked,
@@ -737,6 +779,7 @@ namespace Mp3TaggerGUI
             WriteDjoidEmotionTag = chkWriteDjoidEmotionTag.Checked,
             WriteDjoidKeyTag = chkWriteDjoidKeyTag.Checked,
             WriteDjoidBpmTag = chkWriteDjoidBpmTag.Checked,
+            WriteDjoidComment = chkWriteDjoidComment.Checked,
             ScaleDjoidEnergyDanceToTen = chkScaleDjoidToTen.Checked
         };
 

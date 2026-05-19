@@ -80,6 +80,7 @@ namespace Mp3TaggerGUI
                     var beforeBpm = file.Tag.BeatsPerMinute == 0 ? "" : file.Tag.BeatsPerMinute.ToString();
                     var beforeKey = file.Tag.InitialKey ?? "";
                     var beforeComment = file.Tag.Comment ?? "";
+                    var targetComment = beforeComment;
                     var targetGenre = beforeGenres;
                     var targetLabel = beforeLabel;
                     var status = "Brak w bazie";
@@ -93,14 +94,33 @@ namespace Mp3TaggerGUI
                                 ? beforeGenres
                                 : TaggingApplier.BuildGenreValueFromDjoid(flags, info.DjoidGenre, info.DjoidSubgenre, beforeGenres);
                             targetLabel = beforeLabel;
+                            if (flags.WriteDjoidComment)
+                                targetComment = TaggingApplier.BuildDjoidCommentValue(beforeComment, flags, info);
                         }
                         else
                         {
                             targetGenre = flags.DoGenre ? TaggingApplier.BuildGenreValue(flags, info.Genres, beforeGenres) : beforeGenres;
                             targetLabel = flags.DoLabel ? TaggingApplier.BuildLabelValue(flags, info.Labels, beforeLabel) : beforeLabel;
+                            if (flags.WriteDmcComment || flags.RepairDmcComment || flags.CleanupCommentMetadata)
+                                targetComment = TaggingApplier.BuildCommentValue(beforeComment, flags);
                         }
+                        var metadataOptionSelected = flags.DataSource == TagDataSource.DjoidJson
+                            ? flags.WriteDjoidComment
+                                || flags.WriteDjoidGenreTag
+                                || flags.WriteDjoidSubgenreTag
+                                || flags.WriteDjoidEnergyTag
+                                || flags.WriteDjoidDanceabilityTag
+                                || flags.WriteDjoidEmotionTag
+                                || flags.WriteDjoidKeyTag
+                                || flags.WriteDjoidBpmTag
+                            : flags.WriteDmcComment
+                                || flags.RepairDmcComment
+                                || flags.CleanupCommentMetadata
+                                || flags.WriteDmcGenreTag;
                         apply = !string.Equals(beforeGenres, targetGenre, StringComparison.Ordinal)
-                            || !string.Equals(beforeLabel, targetLabel, StringComparison.Ordinal);
+                            || !string.Equals(beforeLabel, targetLabel, StringComparison.Ordinal)
+                            || !string.Equals(beforeComment, targetComment, StringComparison.Ordinal)
+                            || metadataOptionSelected;
                         status = apply ? "Do zapisu" : "Bez zmian";
                     }
 
@@ -123,7 +143,7 @@ namespace Mp3TaggerGUI
                         CurrentKey = beforeKey,
                         Key = beforeKey,
                         CurrentComment = beforeComment,
-                        Comment = beforeComment,
+                        Comment = targetComment,
                         CurrentGenre = beforeGenres,
                         CurrentLabel = beforeLabel,
                         Genre = targetGenre,
@@ -203,77 +223,112 @@ namespace Mp3TaggerGUI
                         var id3v2 = file.GetTag(TagTypes.Id3v2, true) as TagLib.Id3v2.Tag;
                         var beforeGenres = string.Join(TaggingText.Sep, (file.Tag.Genres ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)));
                         var beforeLabel = file.Tag.Publisher ?? "";
+                        var beforeComment = file.Tag.Comment ?? "";
+                        var beforeTxxx = TaggingApplier.SnapshotTxxx(id3v2);
                         var changed = TaggingApplier.ApplyManualUpdate(
                             file, id3v2, flags, row.Genre, row.Label, beforeGenres, beforeLabel,
                             out var afterGenres, out var afterLabel);
-                        if (!flags.DryRun)
+                        var txxxChanged = false;
+                        if (flags.DataSource == TagDataSource.DjPromoJson)
                         {
-                            var targetAlbum = row.Album?.Trim() ?? "";
-                            if (!string.Equals((file.Tag.Album ?? ""), targetAlbum, StringComparison.Ordinal))
-                            {
+                            txxxChanged = TaggingApplier.ApplyDmcGenreTag(id3v2, flags, afterGenres);
+                            changed = txxxChanged || changed;
+                        }
+
+                        var targetAlbum = row.Album?.Trim() ?? "";
+                        if (!string.Equals((file.Tag.Album ?? ""), targetAlbum, StringComparison.Ordinal))
+                        {
+                            if (!flags.DryRun)
                                 file.Tag.Album = targetAlbum;
-                                changed = true;
-                            }
+                            changed = true;
+                        }
 
-                            var targetComment = row.Comment?.Trim() ?? "";
-                            if (!string.Equals((file.Tag.Comment ?? ""), targetComment, StringComparison.Ordinal))
-                            {
+                        var djoidInfo = new TrackLookupInfo
+                        {
+                            DjoidGenre = row.DjoidGenre,
+                            DjoidSubgenre = row.DjoidSubgenre,
+                            DjoidEnergy = row.DjoidEnergy,
+                            DjoidDanceability = row.DjoidDanceability,
+                            DjoidEmotion = row.DjoidEmotion,
+                            DjoidKey = row.DjoidKey,
+                            DjoidBpm = row.DjoidBpm
+                        };
+
+                        var targetComment = row.Comment?.Trim() ?? "";
+                        if (flags.DataSource == TagDataSource.DjPromoJson
+                            && (flags.WriteDmcComment || flags.RepairDmcComment || flags.CleanupCommentMetadata))
+                        {
+                            targetComment = TaggingApplier.BuildCommentValue(targetComment, flags);
+                        }
+                        if (row.IsDjoid && flags.WriteDjoidComment)
+                        {
+                            targetComment = TaggingApplier.BuildDjoidCommentValue(targetComment, flags, djoidInfo);
+                        }
+                        if (!string.Equals((file.Tag.Comment ?? ""), targetComment, StringComparison.Ordinal))
+                        {
+                            if (!flags.DryRun)
                                 file.Tag.Comment = targetComment;
-                                changed = true;
-                            }
+                            changed = true;
+                        }
 
-                            var targetKey = row.Key?.Trim() ?? "";
-                            if (!string.Equals((file.Tag.InitialKey ?? ""), targetKey, StringComparison.Ordinal))
-                            {
+                        var targetKey = row.Key?.Trim() ?? "";
+                        if (!string.Equals((file.Tag.InitialKey ?? ""), targetKey, StringComparison.Ordinal))
+                        {
+                            if (!flags.DryRun)
                                 file.Tag.InitialKey = targetKey;
-                                changed = true;
-                            }
+                            changed = true;
+                        }
 
-                            if (uint.TryParse((row.Year ?? "").Trim(), out var yearParsed))
+                        if (uint.TryParse((row.Year ?? "").Trim(), out var yearParsed))
+                        {
+                            if (file.Tag.Year != yearParsed)
                             {
-                                if (file.Tag.Year != yearParsed)
-                                {
+                                if (!flags.DryRun)
                                     file.Tag.Year = yearParsed;
-                                    changed = true;
-                                }
-                            }
-                            else if (string.IsNullOrWhiteSpace(row.Year) && file.Tag.Year != 0)
-                            {
-                                file.Tag.Year = 0;
-                                changed = true;
-                            }
-
-                            if (uint.TryParse((row.Track ?? "").Trim(), out var trackParsed))
-                            {
-                                if (file.Tag.Track != trackParsed)
-                                {
-                                    file.Tag.Track = trackParsed;
-                                    changed = true;
-                                }
-                            }
-                            else if (string.IsNullOrWhiteSpace(row.Track) && file.Tag.Track != 0)
-                            {
-                                file.Tag.Track = 0;
-                                changed = true;
-                            }
-
-                            if (uint.TryParse((row.Bpm ?? "").Trim(), out var bpmParsed))
-                            {
-                                if (file.Tag.BeatsPerMinute != bpmParsed)
-                                {
-                                    file.Tag.BeatsPerMinute = bpmParsed;
-                                    changed = true;
-                                }
-                            }
-                            else if (string.IsNullOrWhiteSpace(row.Bpm) && file.Tag.BeatsPerMinute != 0)
-                            {
-                                file.Tag.BeatsPerMinute = 0;
                                 changed = true;
                             }
                         }
-                        if (!flags.DryRun && row.IsDjoid)
+                        else if (string.IsNullOrWhiteSpace(row.Year) && file.Tag.Year != 0)
                         {
-                            changed = TaggingApplier.ApplyDjoidTags(id3v2, flags, new TrackLookupInfo
+                            if (!flags.DryRun)
+                                file.Tag.Year = 0;
+                            changed = true;
+                        }
+
+                        if (uint.TryParse((row.Track ?? "").Trim(), out var trackParsed))
+                        {
+                            if (file.Tag.Track != trackParsed)
+                            {
+                                if (!flags.DryRun)
+                                    file.Tag.Track = trackParsed;
+                                changed = true;
+                            }
+                        }
+                        else if (string.IsNullOrWhiteSpace(row.Track) && file.Tag.Track != 0)
+                        {
+                            if (!flags.DryRun)
+                                file.Tag.Track = 0;
+                            changed = true;
+                        }
+
+                        if (uint.TryParse((row.Bpm ?? "").Trim(), out var bpmParsed))
+                        {
+                            if (file.Tag.BeatsPerMinute != bpmParsed)
+                            {
+                                if (!flags.DryRun)
+                                    file.Tag.BeatsPerMinute = bpmParsed;
+                                changed = true;
+                            }
+                        }
+                        else if (string.IsNullOrWhiteSpace(row.Bpm) && file.Tag.BeatsPerMinute != 0)
+                        {
+                            if (!flags.DryRun)
+                                file.Tag.BeatsPerMinute = 0;
+                            changed = true;
+                        }
+                        if (row.IsDjoid)
+                        {
+                            var djoidTxxxChanged = TaggingApplier.ApplyDjoidTags(id3v2, flags, new TrackLookupInfo
                             {
                                 DjoidGenre = row.DjoidGenre,
                                 DjoidSubgenre = row.DjoidSubgenre,
@@ -282,7 +337,9 @@ namespace Mp3TaggerGUI
                                 DjoidEmotion = row.DjoidEmotion,
                                 DjoidKey = row.DjoidKey,
                                 DjoidBpm = row.DjoidBpm
-                            }) || changed;
+                            });
+                            txxxChanged = djoidTxxxChanged || txxxChanged;
+                            changed = djoidTxxxChanged || changed;
                         }
 
                         var kind = changed ? ChangeKind.Updated : ChangeKind.Unchanged;
@@ -292,7 +349,18 @@ namespace Mp3TaggerGUI
                                 file.Save();
                             res.Updated++;
                             row.Status = flags.DryRun ? "Dry run" : "Zapisano";
-                            backup?.WriteRow(row.FilePath, beforeGenres, beforeLabel, afterGenres, afterLabel);
+                            backup?.WriteRow(TaggingApplier.CreateRecord(
+                                ChangeKind.Updated,
+                                beforeGenres,
+                                afterGenres,
+                                beforeLabel,
+                                afterLabel,
+                                beforeComment,
+                                targetComment ?? "",
+                                beforeTxxx,
+                                TaggingApplier.SnapshotTxxx(id3v2),
+                                BuildChangedFields(beforeGenres, afterGenres, beforeLabel, afterLabel, beforeComment, targetComment ?? "", beforeTxxx, TaggingApplier.SnapshotTxxx(id3v2))),
+                                row.FilePath);
                         }
                         else
                         {
@@ -308,7 +376,22 @@ namespace Mp3TaggerGUI
                         row.CurrentBpm = file.Tag.BeatsPerMinute == 0 ? "" : file.Tag.BeatsPerMinute.ToString();
                         row.CurrentKey = file.Tag.InitialKey ?? "";
                         row.CurrentComment = file.Tag.Comment ?? "";
-                        csv?.WriteRow(TaggingApplier.CreateRecord(kind, beforeGenres, afterGenres, beforeLabel, afterLabel), row.FilePath);
+                        var afterTxxx = TaggingApplier.SnapshotTxxx(id3v2);
+                        if (flags.DryRun && txxxChanged && string.Equals(beforeTxxx, afterTxxx, StringComparison.Ordinal))
+                            afterTxxx = string.IsNullOrWhiteSpace(beforeTxxx) ? "(planowane zmiany TXXX)" : $"{beforeTxxx}{TaggingText.Sep}(planowane zmiany TXXX)";
+                        var finalComment = flags.DryRun ? targetComment ?? "" : file.Tag.Comment ?? "";
+                        csv?.WriteRow(TaggingApplier.CreateRecord(
+                            kind,
+                            beforeGenres,
+                            afterGenres,
+                            beforeLabel,
+                            afterLabel,
+                            beforeComment,
+                            finalComment,
+                            beforeTxxx,
+                            afterTxxx,
+                            BuildChangedFields(beforeGenres, afterGenres, beforeLabel, afterLabel, beforeComment, finalComment, beforeTxxx, afterTxxx)),
+                            row.FilePath);
                         onLog?.Invoke($"{row.Status}: {row.FileName}");
                     }
                     catch (Exception ex)
@@ -392,7 +475,7 @@ namespace Mp3TaggerGUI
 
                         csv?.WriteRow(r, path);
                         if (r.Kind == ChangeKind.Updated)
-                            backup?.WriteRow(path, r.BeforeGenre, r.BeforeLabel, r.AfterGenre, r.AfterLabel);
+                            backup?.WriteRow(r, path);
                     }
                     catch (Exception ex)
                     {
@@ -459,9 +542,10 @@ namespace Mp3TaggerGUI
                     var t = prop.Value as JObject;
                     if (t == null) continue;
                     var artistToken = t["artist"];
-                    var artist = artistToken is JArray aArr
-                        ? TaggingText.Norm(string.Join(" & ", aArr.Select(x => (string?)x).Where(x => !string.IsNullOrWhiteSpace(x))))
-                        : TaggingText.Norm((string?)artistToken);
+                    var artistParts = artistToken is JArray aArr
+                        ? aArr.Select(x => TaggingText.Norm((string?)x)).Where(x => x.Length > 0).ToList()
+                        : [TaggingText.Norm((string?)artistToken)];
+                    var artist = artistParts.Count > 0 ? artistParts[0] : "";
                     var title = TaggingText.Norm((string?)t["title"]);
                     var version = "";
                     var m = System.Text.RegularExpressions.Regex.Match(title, @"\(([^()]*)\)\s*$");
@@ -485,9 +569,12 @@ namespace Mp3TaggerGUI
                         DjoidBpm = tokenText("bpm")
                     };
 
-                    map[(artist, title, version)] = info;
-                    if (!string.IsNullOrEmpty(version))
-                        map.TryAdd((artist, title, ""), info);
+                    foreach (var artistAlias in BuildDjoidArtistAliases(artistParts, (string?)t["filename"]))
+                    {
+                        map[(artistAlias, title, version)] = info;
+                        if (!string.IsNullOrEmpty(version))
+                            map.TryAdd((artistAlias, title, ""), info);
+                    }
                 }
 
                 return map;
@@ -506,6 +593,41 @@ namespace Mp3TaggerGUI
                     map.TryAdd((artist, title, ""), new TrackLookupInfo { Genres = genres, Labels = labels });
             }
             return map;
+        }
+
+        private static IEnumerable<string> BuildDjoidArtistAliases(List<string> artistParts, string? filename)
+        {
+            var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var cleanParts = artistParts.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+
+            if (cleanParts.Count == 1)
+            {
+                aliases.Add(cleanParts[0]);
+            }
+            else if (cleanParts.Count > 1)
+            {
+                aliases.Add(string.Join(", ", cleanParts));
+                aliases.Add(string.Join(" & ", cleanParts));
+                aliases.Add(string.Join(" x ", cleanParts));
+            }
+
+            var fileArtist = ExtractArtistFromDjoidFilename(filename);
+            if (!string.IsNullOrWhiteSpace(fileArtist))
+                aliases.Add(fileArtist);
+
+            return aliases.Select(TaggingText.Norm).Where(x => x.Length > 0);
+        }
+
+        private static string ExtractArtistFromDjoidFilename(string? filename)
+        {
+            var name = TaggingText.Norm(filename);
+            if (string.IsNullOrWhiteSpace(name))
+                return "";
+
+            name = System.Text.RegularExpressions.Regex.Replace(name, @"\s+pn\.mp3$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            name = System.Text.RegularExpressions.Regex.Replace(name, @"_pn\.mp3$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var m = System.Text.RegularExpressions.Regex.Match(name, @"^(.*?)\s*-\s*.*$");
+            return m.Success ? TaggingText.Norm(m.Groups[1].Value) : "";
         }
 
         private static ChangeRecord ProcessOneWithRetry(
@@ -560,17 +682,22 @@ namespace Mp3TaggerGUI
 
             var beforeGenres = string.Join(TaggingText.Sep, (file.Tag.Genres ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)));
             var beforeLabel = file.Tag.Publisher ?? "";
+            var beforeComment = file.Tag.Comment ?? "";
+            var beforeTxxx = TaggingApplier.SnapshotTxxx(id3v2);
 
             if (!TaggingResolver.TryResolveInfo(path, artist, title, version, db, flags.FilenameFallback, out var info))
             {
                 onLog?.Invoke($"MISSING: {Path.GetFileName(path)} -> [{artist} | {title} | {version}]");
-                return TaggingApplier.CreateRecord(ChangeKind.Missing, beforeGenres, beforeGenres, beforeLabel, beforeLabel);
+                return TaggingApplier.CreateRecord(ChangeKind.Missing, beforeGenres, beforeGenres, beforeLabel, beforeLabel, beforeComment, beforeComment, beforeTxxx, beforeTxxx);
             }
 
             var afterGenres = beforeGenres;
             var afterLabel = beforeLabel;
+            var afterComment = beforeComment;
             var genreChanged = false;
             var labelChanged = false;
+            var commentChanged = false;
+            var txxxChanged = false;
 
             if (flags.DataSource == TagDataSource.DjoidJson)
             {
@@ -582,16 +709,25 @@ namespace Mp3TaggerGUI
                         file.Tag.Genres = string.IsNullOrWhiteSpace(afterGenres) ? [] : [afterGenres];
                 }
 
-                if (!flags.DryRun)
-                    labelChanged = TaggingApplier.ApplyDjoidTags(id3v2, flags, info);
+                txxxChanged = TaggingApplier.ApplyDjoidTags(id3v2, flags, info);
+
+                if (flags.WriteDjoidComment)
+                    commentChanged = TaggingApplier.ApplyDjoidComment(file, flags, info, out afterComment);
             }
             else
             {
                 genreChanged = TaggingApplier.ApplyGenreUpdate(file, flags, info.Genres, beforeGenres, out afterGenres);
                 labelChanged = TaggingApplier.ApplyLabelUpdate(file, id3v2, flags, info.Labels, beforeLabel, out afterLabel);
+                txxxChanged = TaggingApplier.ApplyDmcGenreTag(id3v2, flags, afterGenres);
+                if (flags.WriteDmcComment || flags.RepairDmcComment || flags.CleanupCommentMetadata)
+                    commentChanged = TaggingApplier.ApplyCommentOptions(file, flags, out afterComment);
             }
 
-            var changed = genreChanged || labelChanged;
+            var changed = genreChanged || labelChanged || commentChanged || txxxChanged;
+            var afterTxxx = TaggingApplier.SnapshotTxxx(id3v2);
+            if (flags.DryRun && txxxChanged && string.Equals(beforeTxxx, afterTxxx, StringComparison.Ordinal))
+                afterTxxx = string.IsNullOrWhiteSpace(beforeTxxx) ? "(planowane zmiany TXXX)" : $"{beforeTxxx}{TaggingText.Sep}(planowane zmiany TXXX)";
+            var changedFields = BuildChangedFields(beforeGenres, afterGenres, beforeLabel, afterLabel, beforeComment, afterComment, beforeTxxx, afterTxxx);
 
             if (changed)
             {
@@ -599,11 +735,33 @@ namespace Mp3TaggerGUI
                     file.Save();
 
                 onLog?.Invoke($"UPDATED: {Path.GetFileName(path)}");
-                return TaggingApplier.CreateRecord(ChangeKind.Updated, beforeGenres, afterGenres, beforeLabel, afterLabel);
+                return TaggingApplier.CreateRecord(ChangeKind.Updated, beforeGenres, afterGenres, beforeLabel, afterLabel, beforeComment, afterComment, beforeTxxx, afterTxxx, changedFields);
             }
 
             onLog?.Invoke($"OK: {Path.GetFileName(path)}");
-            return TaggingApplier.CreateRecord(ChangeKind.Unchanged, beforeGenres, afterGenres, beforeLabel, afterLabel);
+            return TaggingApplier.CreateRecord(ChangeKind.Unchanged, beforeGenres, afterGenres, beforeLabel, afterLabel, beforeComment, afterComment, beforeTxxx, afterTxxx, changedFields);
+        }
+
+        private static string BuildChangedFields(
+            string beforeGenre,
+            string afterGenre,
+            string beforeLabel,
+            string afterLabel,
+            string beforeComment,
+            string afterComment,
+            string beforeTxxx,
+            string afterTxxx)
+        {
+            var fields = new List<string>();
+            if (!string.Equals(beforeGenre ?? "", afterGenre ?? "", StringComparison.Ordinal))
+                fields.Add("GENRE");
+            if (!string.Equals(beforeLabel ?? "", afterLabel ?? "", StringComparison.Ordinal))
+                fields.Add("LABEL");
+            if (!string.Equals(beforeComment ?? "", afterComment ?? "", StringComparison.Ordinal))
+                fields.Add("COMMENT");
+            if (!string.Equals(beforeTxxx ?? "", afterTxxx ?? "", StringComparison.Ordinal))
+                fields.Add("TXXX");
+            return string.Join(", ", fields);
         }
 
     }

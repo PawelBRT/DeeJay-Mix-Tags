@@ -36,7 +36,7 @@ public class TaggingLogicIntegrationTests
             Assert.True(IOFile.Exists(result.CsvPath!));
 
             var csv = IOFile.ReadAllText(result.CsvPath!);
-            Assert.StartsWith("File;Status;GenresBefore;GenresAfter;LabelBefore;LabelAfter", csv);
+            Assert.StartsWith("File;Status;ChangedFields;GenresBefore;GenresAfter;LabelBefore;LabelAfter;CommentBefore;CommentAfter;TxxxBefore;TxxxAfter", csv);
         }
         finally
         {
@@ -816,6 +816,255 @@ public class TaggingLogicIntegrationTests
         {
             TryDeleteDirectory(root);
         }
+    }
+
+    [Fact]
+    public void ProcessCore_DjoidSource_MatchesCommaSeparatedArtistAliasFromFilename()
+    {
+        var root = CreateTempDirectory();
+        var jsonPath = Path.Combine(root, "db.json");
+        IOFile.WriteAllText(jsonPath, """
+        [
+          {
+            "key": "DJSAPP",
+            "value": {
+              "tracks": {
+                "tracksByIds": {
+                  "id-1": {
+                    "artist": ["AUDIO JACKER", "SANDY S GROOVE"],
+                    "title": "Nobody But You (Extended Mix)",
+                    "filename": "AUDIO JACKER, SANDY S GROOVE - Nobody But You (Extended Mix) pn.mp3",
+                    "genres": ["house"],
+                    "subgenres": ["funky house"]
+                  }
+                }
+              }
+            }
+          }
+        ]
+        """);
+
+        var filePath = Path.Combine(root, "AUDIO JACKER, SANDY S GROOVE - Nobody But You (Extended Mix)_pn.mp3");
+        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+        try
+        {
+            var options = new TaggingOptions
+            {
+                DataSource = TagDataSource.DjoidJson,
+                DryRun = false,
+                WriteCsvReport = false,
+                DjoidGenreSource = DjoidGenreSource.GenreAndSubgenre,
+                DjoidGenreWriteMode = GenreWriteMode.Replace,
+                TitleCase = true,
+                NormalizeSeparators = true,
+                Dedup = true
+            };
+
+            FakeTagFile? fake = null;
+            var result = TaggingLogic.ProcessCore(
+                reportRoot: root,
+                jsonPath: jsonPath,
+                flags: options,
+                files: new[] { filePath },
+                fileFactory: _ => fake = new FakeTagFile("AUDIO JACKER, SANDY S GROOVE", "Nobody But You", "Extended Mix", genres: "Old", publisher: ""));
+
+            Assert.Equal(1, result.Total);
+            Assert.Equal(1, result.Updated);
+            Assert.Equal(0, result.Missing);
+            Assert.NotNull(fake);
+            Assert.Equal("House | Funky House", fake!.Tag.Genres.Single());
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void ProcessCore_DjoidSource_DryRunCountsPlannedTxxxChangesWithoutWritingFrames()
+    {
+        var root = CreateTempDirectory();
+        var jsonPath = Path.Combine(root, "db.json");
+        IOFile.WriteAllText(jsonPath, """
+        [
+          {
+            "key": "DJSAPP",
+            "value": {
+              "tracks": {
+                "tracksByIds": {
+                  "id-1": {
+                    "artist": ["Artist"],
+                    "title": "Song (Club Mix)",
+                    "genres": ["house"],
+                    "subgenres": ["tech house"],
+                    "energy": 0.8,
+                    "danceability": 0.6,
+                    "key": "9A",
+                    "bpm": 124
+                  }
+                }
+              }
+            }
+          }
+        ]
+        """);
+
+        var filePath = Path.Combine(root, "Artist - Song.mp3");
+        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+        try
+        {
+            var options = new TaggingOptions
+            {
+                DataSource = TagDataSource.DjoidJson,
+                DryRun = true,
+                WriteCsvReport = true,
+                DjoidGenreSource = DjoidGenreSource.None,
+                WriteDjoidGenreTag = true,
+                WriteDjoidSubgenreTag = true,
+                WriteDjoidEnergyTag = true,
+                WriteDjoidDanceabilityTag = true,
+                WriteDjoidEmotionTag = false,
+                WriteDjoidKeyTag = true,
+                WriteDjoidBpmTag = true,
+                ScaleDjoidEnergyDanceToTen = true
+            };
+
+            FakeTagFile? fake = null;
+            var result = TaggingLogic.ProcessCore(
+                reportRoot: root,
+                jsonPath: jsonPath,
+                flags: options,
+                files: new[] { filePath },
+                fileFactory: _ => fake = new FakeTagFile("Artist", "Song", "Club Mix", genres: "Old", publisher: ""));
+
+            Assert.Equal(1, result.Updated);
+            Assert.Equal(0, result.Unchanged);
+            Assert.NotNull(fake);
+            Assert.Equal(0, fake!.SaveCount);
+            Assert.Empty(fake.RealId3v2.GetFrames<TagLib.Id3v2.UserTextInformationFrame>());
+
+            var csv = IOFile.ReadAllText(result.CsvPath!);
+            Assert.Contains("TXXX", csv);
+            Assert.Contains("planowane zmiany TXXX", csv);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void ProcessCore_DjPromoThenDjoidWorkflow_PreservesDmcGenreBackupAndWritesDjoidMetadata()
+    {
+        var root = CreateTempDirectory();
+        var djPromoJson = Path.Combine(root, "djpromo.json");
+        var djoidJson = Path.Combine(root, "djoid.json");
+        IOFile.WriteAllText(djPromoJson, "[{\"artist\":\"Artist\",\"title\":\"Song\",\"version\":\"Club Mix\",\"genres\":\"club\",\"labels\":\"Label One\"}]");
+        IOFile.WriteAllText(djoidJson, """
+        [
+          {
+            "key": "DJSAPP",
+            "value": {
+              "tracks": {
+                "tracksByIds": {
+                  "id-1": {
+                    "artist": ["Artist"],
+                    "title": "Song (Club Mix)",
+                    "genres": ["house"],
+                    "subgenres": ["deep house"],
+                    "energy": 0.9,
+                    "danceability": 0.7,
+                    "emotion": -1,
+                    "key": "10A",
+                    "bpm": 126
+                  }
+                }
+              }
+            }
+          }
+        ]
+        """);
+
+        var filePath = Path.Combine(root, "Artist - Song (Club Mix).mp3");
+        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+        try
+        {
+            var fake = new FakeTagFile("Artist", "Song", "Club Mix", genres: "", publisher: "");
+
+            var promoResult = TaggingLogic.ProcessCore(
+                reportRoot: root,
+                jsonPath: djPromoJson,
+                flags: new TaggingOptions
+                {
+                    DataSource = TagDataSource.DjPromoJson,
+                    DryRun = false,
+                    WriteCsvReport = false,
+                    DoGenre = true,
+                    DoLabel = true,
+                    AlwaysAppendToGenre = true,
+                    WriteTxxxLabel = true,
+                    WriteDmcGenreTag = true,
+                    Dedup = true,
+                    NormalizeSeparators = true,
+                    TitleCase = true
+                },
+                files: new[] { filePath },
+                fileFactory: _ => fake);
+
+            Assert.Equal(1, promoResult.Updated);
+            Assert.Equal("Club | DJPromo.pl", fake.Tag.Genres.Single());
+            Assert.Equal("Club | DJPromo.pl", TxxxValue(fake, "DMC_GENRE"));
+
+            var djoidResult = TaggingLogic.ProcessCore(
+                reportRoot: root,
+                jsonPath: djoidJson,
+                flags: new TaggingOptions
+                {
+                    DataSource = TagDataSource.DjoidJson,
+                    DryRun = false,
+                    WriteCsvReport = false,
+                    DjoidGenreSource = DjoidGenreSource.GenreAndSubgenre,
+                    DjoidGenreWriteMode = GenreWriteMode.Replace,
+                    WriteDjoidGenreTag = true,
+                    WriteDjoidSubgenreTag = true,
+                    WriteDjoidEnergyTag = true,
+                    WriteDjoidDanceabilityTag = true,
+                    WriteDjoidEmotionTag = true,
+                    WriteDjoidKeyTag = true,
+                    WriteDjoidBpmTag = true,
+                    WriteDjoidComment = true,
+                    ScaleDjoidEnergyDanceToTen = true,
+                    Dedup = true,
+                    NormalizeSeparators = true,
+                    TitleCase = true
+                },
+                files: new[] { filePath },
+                fileFactory: _ => fake);
+
+            Assert.Equal(1, djoidResult.Updated);
+            Assert.Equal("House | Deep House", fake.Tag.Genres.Single());
+            Assert.Equal("Club | DJPromo.pl", TxxxValue(fake, "DMC_GENRE"));
+            Assert.Equal("House", TxxxValue(fake, "DJOID_GENRE"));
+            Assert.Equal("Deep House", TxxxValue(fake, "DJOID_SUBGENRE"));
+            Assert.Equal("9", TxxxValue(fake, "DJOID_ENERGY"));
+            Assert.Equal("7", TxxxValue(fake, "DJOID_DANCEABILITY"));
+            Assert.Contains("DJOID: Danceability: 7", fake.Tag.Comment);
+            Assert.Contains("Genre: house", fake.Tag.Comment, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    private static string TxxxValue(FakeTagFile file, string description)
+    {
+        return file.RealId3v2.GetFrames<TagLib.Id3v2.UserTextInformationFrame>()
+            .FirstOrDefault(f => string.Equals(f.Description, description, StringComparison.OrdinalIgnoreCase))
+            ?.Text.FirstOrDefault() ?? "";
     }
 
                     private static string CreateTempDirectory()

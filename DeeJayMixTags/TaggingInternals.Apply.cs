@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using TagLib;
 using TagLib.Id3v2;
 
@@ -8,6 +9,22 @@ namespace Mp3TaggerGUI
 {
     internal static class TaggingApplier
     {
+        private const string DmcComment = "Niniejszy plik zostal udostepniony czlonkowi DEEJAY mix clubu, Azeby mozna bylo go publicznie odtwarzac - DJ musi posiadac aktualna legitymacje klubowa. Nosniki dzwieku przygotowywane przez DEEJAY mix club sa legalne i posiadaja wszelkie prawa do publicznych odtworzen. DEEJAY mix club";
+        private static readonly Regex DmcFullRegex = new(
+            @"(?is)(\s*(\|\s*|-\s*))?Niniejszy plik zostal udostepniony.*?publicznych odtworzen\.\s*DEEJAY mix club\b\.?",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex DmcFallbackRegex = new(
+            @"(?is)(\s*(\|\s*|-\s*))?Niniejszy plik zostal udostepniony.*$",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex CommentMetadataRegex = new(
+            @"(?is)\s*(\|\s*|-\s*)Record\s*label\s*:\s*[^|]+"
+            + @"|\s*(\|\s*|-\s*)Key\s*:?\s*\d{1,2}[AB]\b"
+            + @"|\s*(\|\s*|-\s*)Energy\s*:?\s*\d+\b",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex DjoidCommentRegex = new(
+            @"(?is)(\s*(\|\s*|-\s*))?DJOID\s*:\s*[^|]*",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         public static bool ApplyGenreUpdate(
             TagLib.File file,
             TaggingOptions flags,
@@ -45,9 +62,9 @@ namespace Mp3TaggerGUI
             bool publisherChanged = !string.Equals(beforeLabel, afterLabel, StringComparison.Ordinal);
             bool txxxChanged = false;
 
-            if (!flags.DryRun && flags.WriteTxxxLabel && id3v2 != null)
+            if (flags.WriteTxxxLabel && id3v2 != null)
             {
-                txxxChanged = EnsureTxxxLabel(id3v2, afterLabel);
+                txxxChanged = SetOrUpdateTxxx(id3v2, "LABEL", afterLabel, flags.DryRun);
             }
 
             if (publisherChanged)
@@ -147,11 +164,99 @@ namespace Mp3TaggerGUI
                     changed = true;
                 }
 
-                if (!flags.DryRun && flags.WriteTxxxLabel && id3v2 != null)
-                    changed = EnsureTxxxLabel(id3v2, afterLabel) || changed;
+                if (flags.WriteTxxxLabel && id3v2 != null)
+                    changed = SetOrUpdateTxxx(id3v2, "LABEL", afterLabel, flags.DryRun) || changed;
             }
 
             return changed;
+        }
+
+        public static bool ApplyCommentOptions(
+            TagLib.File file,
+            TaggingOptions flags,
+            out string afterComment)
+        {
+            var beforeComment = file.Tag.Comment ?? "";
+            afterComment = BuildCommentValue(beforeComment, flags);
+            if (string.Equals(beforeComment, afterComment, StringComparison.Ordinal))
+                return false;
+
+            if (!flags.DryRun)
+                file.Tag.Comment = afterComment;
+
+            return true;
+        }
+
+        public static string BuildCommentValue(string currentComment, TaggingOptions flags)
+        {
+            var current = currentComment ?? "";
+            if (flags.CleanupCommentMetadata)
+                current = CommentMetadataRegex.Replace(current, "");
+
+            var hasFullDmc = current.IndexOf(DmcComment, StringComparison.OrdinalIgnoreCase) >= 0;
+            var hasAnyDmc = current.IndexOf("Niniejszy plik zostal udostepniony", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (flags.RepairDmcComment || (flags.WriteDmcComment && hasAnyDmc && !hasFullDmc))
+            {
+                current = DmcFullRegex.Replace(current, "");
+                current = DmcFallbackRegex.Replace(current, "");
+                hasFullDmc = false;
+            }
+
+            current = NormalizeCommentSeparators(current);
+
+            if (flags.WriteDmcComment && !hasFullDmc)
+                current = string.IsNullOrWhiteSpace(current) ? DmcComment : $"{current}{TaggingText.Sep}{DmcComment}";
+
+            return NormalizeCommentSeparators(current);
+        }
+
+        public static bool ApplyDjoidComment(
+            TagLib.File file,
+            TaggingOptions flags,
+            TrackLookupInfo info,
+            out string afterComment)
+        {
+            var beforeComment = file.Tag.Comment ?? "";
+            afterComment = BuildDjoidCommentValue(beforeComment, flags, info);
+            if (string.Equals(beforeComment, afterComment, StringComparison.Ordinal))
+                return false;
+
+            if (!flags.DryRun)
+                file.Tag.Comment = afterComment;
+
+            return true;
+        }
+
+        public static string BuildDjoidCommentValue(string currentComment, TaggingOptions flags, TrackLookupInfo info)
+        {
+            var current = currentComment ?? "";
+            var dmcMatch = DmcFullRegex.Match(current);
+            var dmcComment = dmcMatch.Success ? DmcComment : "";
+
+            current = DmcFullRegex.Replace(current, "");
+            current = DmcFallbackRegex.Replace(current, "");
+            current = DjoidCommentRegex.Replace(current, "");
+
+            var parts = new List<string>();
+            AddCommentPart(parts, "Danceability", ScaleDjoidNumeric(info.DjoidDanceability, flags.ScaleDjoidEnergyDanceToTen));
+            AddCommentPart(parts, "Emotion", info.DjoidEmotion);
+            AddCommentPart(parts, "Energy", ScaleDjoidNumeric(info.DjoidEnergy, flags.ScaleDjoidEnergyDanceToTen));
+            AddCommentPart(parts, "Key", info.DjoidKey);
+            AddCommentPart(parts, "Genre", CleanDjoidGenreForTag(info.DjoidGenre, flags));
+            AddCommentPart(parts, "Subgenre", CleanDjoidGenreForTag(info.DjoidSubgenre, flags));
+
+            var normalized = NormalizeCommentSeparators(current);
+            if (parts.Count > 0)
+            {
+                var djoidBlock = "DJOID: " + string.Join(", ", parts);
+                normalized = string.IsNullOrWhiteSpace(normalized) ? djoidBlock : $"{normalized}{TaggingText.Sep}{djoidBlock}";
+            }
+
+            if (!string.IsNullOrWhiteSpace(dmcComment))
+                normalized = string.IsNullOrWhiteSpace(normalized) ? dmcComment : $"{normalized}{TaggingText.Sep}{dmcComment}";
+
+            return NormalizeCommentSeparators(normalized);
         }
 
         public static bool ApplyDjoidTags(
@@ -164,21 +269,29 @@ namespace Mp3TaggerGUI
 
             var changed = false;
             if (flags.WriteDjoidGenreTag)
-                changed = SetOrUpdateTxxx(id3v2, "DJOID_GENRE", info.DjoidGenre) || changed;
+                changed = SetOrUpdateTxxx(id3v2, "DJOID_GENRE", CleanDjoidGenreForTag(info.DjoidGenre, flags), flags.DryRun) || changed;
             if (flags.WriteDjoidSubgenreTag)
-                changed = SetOrUpdateTxxx(id3v2, "DJOID_SUBGENRE", info.DjoidSubgenre) || changed;
+                changed = SetOrUpdateTxxx(id3v2, "DJOID_SUBGENRE", CleanDjoidGenreForTag(info.DjoidSubgenre, flags), flags.DryRun) || changed;
             if (flags.WriteDjoidEnergyTag)
-                changed = SetOrUpdateTxxx(id3v2, "DJOID_ENERGY", ScaleDjoidNumeric(info.DjoidEnergy, flags.ScaleDjoidEnergyDanceToTen)) || changed;
+                changed = SetOrUpdateTxxx(id3v2, "DJOID_ENERGY", ScaleDjoidNumeric(info.DjoidEnergy, flags.ScaleDjoidEnergyDanceToTen), flags.DryRun) || changed;
             if (flags.WriteDjoidDanceabilityTag)
-                changed = SetOrUpdateTxxx(id3v2, "DJOID_DANCEABILITY", ScaleDjoidNumeric(info.DjoidDanceability, flags.ScaleDjoidEnergyDanceToTen)) || changed;
+                changed = SetOrUpdateTxxx(id3v2, "DJOID_DANCEABILITY", ScaleDjoidNumeric(info.DjoidDanceability, flags.ScaleDjoidEnergyDanceToTen), flags.DryRun) || changed;
             if (flags.WriteDjoidEmotionTag)
-                changed = SetOrUpdateTxxx(id3v2, "DJOID_EMOTION", info.DjoidEmotion) || changed;
+                changed = SetOrUpdateTxxx(id3v2, "DJOID_EMOTION", info.DjoidEmotion, flags.DryRun) || changed;
             if (flags.WriteDjoidKeyTag)
-                changed = SetOrUpdateTxxx(id3v2, "DJOID_KEY", info.DjoidKey) || changed;
+                changed = SetOrUpdateTxxx(id3v2, "DJOID_KEY", info.DjoidKey, flags.DryRun) || changed;
             if (flags.WriteDjoidBpmTag)
-                changed = SetOrUpdateTxxx(id3v2, "DJOID_BPM", info.DjoidBpm) || changed;
+                changed = SetOrUpdateTxxx(id3v2, "DJOID_BPM", info.DjoidBpm, flags.DryRun) || changed;
 
             return changed;
+        }
+
+        public static bool ApplyDmcGenreTag(TagLib.Id3v2.Tag? id3v2, TaggingOptions flags, string dmcGenre)
+        {
+            if (!flags.WriteDmcGenreTag || id3v2 == null || string.IsNullOrWhiteSpace(dmcGenre))
+                return false;
+
+            return SetOrUpdateTxxx(id3v2, "DMC_GENRE", dmcGenre, flags.DryRun);
         }
 
         private static string ScaleDjoidNumeric(string raw, bool scaleToTen)
@@ -193,25 +306,51 @@ namespace Mp3TaggerGUI
             return Math.Round(d).ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        private static bool SetOrUpdateTxxx(TagLib.Id3v2.Tag id3, string desc, string? value)
+        internal static string SnapshotTxxx(TagLib.Id3v2.Tag? id3)
+        {
+            if (id3 == null)
+                return "";
+
+            return string.Join(TaggingText.Sep,
+                id3.GetFrames<UserTextInformationFrame>()
+                    .Where(f => !string.IsNullOrWhiteSpace(f.Description))
+                    .OrderBy(f => f.Description, StringComparer.OrdinalIgnoreCase)
+                    .Select(f => $"{f.Description}={f.Text.FirstOrDefault() ?? ""}"));
+        }
+
+        private static bool SetOrUpdateTxxx(TagLib.Id3v2.Tag id3, string desc, string? value, bool dryRun)
         {
             if (string.IsNullOrWhiteSpace(value))
                 return false;
             var txxx = id3.GetFrames<UserTextInformationFrame>().FirstOrDefault(
                 f => string.Equals(f.Description, desc, StringComparison.OrdinalIgnoreCase));
-            var changed = false;
             if (txxx == null)
             {
+                if (dryRun)
+                    return true;
+
                 txxx = new UserTextInformationFrame(desc) { TextEncoding = StringType.UTF16 };
                 id3.AddFrame(txxx);
-                changed = true;
             }
             if (!string.Equals((txxx.Text.FirstOrDefault() ?? ""), value, StringComparison.Ordinal))
             {
-                txxx.Text = [value];
-                changed = true;
+                if (!dryRun)
+                    txxx.Text = [value];
+                return true;
             }
-            return changed;
+            return false;
+        }
+
+        private static void AddCommentPart(List<string> parts, string label, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return;
+            parts.Add($"{label}: {value.Trim()}");
+        }
+
+        private static string CleanDjoidGenreForTag(string value, TaggingOptions flags)
+        {
+            return TaggingText.Join(TaggingText.CleanGenreList(value, flags));
         }
 
         public static ChangeRecord CreateRecord(
@@ -219,36 +358,37 @@ namespace Mp3TaggerGUI
             string beforeGenre,
             string afterGenre,
             string beforeLabel,
-            string afterLabel) => new()
+            string afterLabel,
+            string beforeComment = "",
+            string afterComment = "",
+            string beforeTxxx = "",
+            string afterTxxx = "",
+            string changedFields = "") => new()
             {
                 Kind = kind,
                 BeforeGenre = beforeGenre,
                 AfterGenre = afterGenre,
                 BeforeLabel = beforeLabel,
-                AfterLabel = afterLabel
+                AfterLabel = afterLabel,
+                BeforeComment = beforeComment,
+                AfterComment = afterComment,
+                BeforeTxxx = beforeTxxx,
+                AfterTxxx = afterTxxx,
+                ChangedFields = changedFields
             };
 
-        private static bool EnsureTxxxLabel(TagLib.Id3v2.Tag id3, string value)
+        private static string NormalizeCommentSeparators(string value)
         {
-            var txxx = id3.GetFrames<UserTextInformationFrame>().FirstOrDefault(
-                f => string.Equals(f.Description, "LABEL", StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrWhiteSpace(value))
+                return "";
 
-            bool changed = false;
-
-            if (txxx == null)
-            {
-                txxx = new UserTextInformationFrame("LABEL") { TextEncoding = StringType.UTF16 };
-                id3.AddFrame(txxx);
-                changed = true;
-            }
-
-            if (!string.Equals((txxx.Text.FirstOrDefault() ?? ""), value, StringComparison.Ordinal))
-            {
-                txxx.Text = [value];
-                changed = true;
-            }
-
-            return changed;
+            var s = value.Trim();
+            s = Regex.Replace(s, @"\s*\|\s*", TaggingText.Sep);
+            s = Regex.Replace(s, @"(\s*\|\s*){2,}", TaggingText.Sep);
+            s = Regex.Replace(s, @"^(\s*\|\s*|\s*-\s*)+", "");
+            s = Regex.Replace(s, @"(\s*\|\s*|\s*-\s*)+$", "");
+            s = Regex.Replace(s, @"\s{2,}", " ");
+            return s.Trim();
         }
     }
 }

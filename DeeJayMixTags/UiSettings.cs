@@ -19,6 +19,11 @@ namespace Mp3TaggerGUI
         public bool DryRun { get; set; } = false;
         public bool WriteCsvReport { get; set; } = true;
         public bool WritePerFileBackup { get; set; } = true;
+        public bool WriteDmcComment { get; set; } = false;
+        public bool RepairDmcComment { get; set; } = false;
+        public bool CleanupCommentMetadata { get; set; } = false;
+        public bool WriteDjoidComment { get; set; } = false;
+        public bool WriteDmcGenreTag { get; set; } = false;
 
         public DjoidGenreSource DjoidGenreSource { get; set; } = DjoidGenreSource.None;
         public GenreWriteMode DjoidGenreWriteMode { get; set; } = GenreWriteMode.Append;
