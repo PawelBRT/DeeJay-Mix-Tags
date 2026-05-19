@@ -142,6 +142,37 @@ public class TaggingApplierTests
     }
 
     [Fact]
+    public void BuildDjoidCommentValue_CollapsesDuplicatedCommentFramesSeparatedBySemicolon()
+    {
+        var flags = new TaggingOptions
+        {
+            WriteDjoidComment = true,
+            ScaleDjoidEnergyDanceToTen = true,
+            TitleCase = true,
+            NormalizeSeparators = true
+        };
+        var info = new TrackLookupInfo
+        {
+            DjoidDanceability = "0.7",
+            DjoidEmotion = "-1",
+            DjoidEnergy = "0.9",
+            DjoidKey = "6A",
+            DjoidGenre = "techno",
+            DjoidSubgenre = "hard techno"
+        };
+        var dmc = "Niniejszy plik zostal udostepniony czlonkowi DEEJAY mix clubu, Azeby mozna bylo go publicznie odtwarzac - DJ musi posiadac aktualna legitymacje klubowa. Nosniki dzwieku przygotowywane przez DEEJAY mix club sa legalne i posiadaja wszelkie prawa do publicznych odtworzen. DEEJAY mix club";
+        var current = $"6A - 138,00 - 7 | DJOID: Danceability: 10, Emotion: -1, Energy: 10, Key: 6A, Genre: Techno, Subgenre: Hard Techno | {dmc}; " +
+            $"6A - 138,00 - 7 | DJOID: Danceability: 7, Emotion: -1, Energy: 9, Key: 6A, Genre: Techno, Subgenre: Hard Techno | {dmc}";
+
+        var result = TaggingApplier.BuildDjoidCommentValue(current, flags, info);
+
+        Assert.Equal(1, result.Split("6A - 138,00 - 7", StringSplitOptions.None).Length - 1);
+        Assert.Equal(1, result.Split("DJOID:", StringSplitOptions.None).Length - 1);
+        Assert.Equal(1, result.Split("Niniejszy plik zostal udostepniony", StringSplitOptions.None).Length - 1);
+        Assert.Equal("6A - 138,00 - 7 | DJOID: Danceability: 7, Emotion: -1, Energy: 9, Key: 6A, Genre: Techno, Subgenre: Hard Techno | " + dmc, result);
+    }
+
+    [Fact]
     public void ApplyGenreUpdate_DryRun_UpdatesOutputWithoutTouchingFile()
     {
         var flags = new TaggingOptions

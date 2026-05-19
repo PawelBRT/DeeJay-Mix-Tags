@@ -383,12 +383,25 @@ namespace Mp3TaggerGUI
                 return "";
 
             var s = value.Trim();
+            s = Regex.Replace(s, @"\s*;\s*", TaggingText.Sep);
             s = Regex.Replace(s, @"\s*\|\s*", TaggingText.Sep);
             s = Regex.Replace(s, @"(\s*\|\s*){2,}", TaggingText.Sep);
             s = Regex.Replace(s, @"^(\s*\|\s*|\s*-\s*)+", "");
             s = Regex.Replace(s, @"(\s*\|\s*|\s*-\s*)+$", "");
             s = Regex.Replace(s, @"\s{2,}", " ");
-            return s.Trim();
+            var parts = s.Split('|')
+                .Select(x => x.Trim())
+                .Where(x => x.Length > 0)
+                .ToList();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var deduped = new List<string>();
+            foreach (var part in parts)
+            {
+                if (seen.Add(part))
+                    deduped.Add(part);
+            }
+
+            return string.Join(TaggingText.Sep, deduped).Trim();
         }
     }
 }
