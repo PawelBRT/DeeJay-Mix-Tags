@@ -77,6 +77,17 @@ namespace Mp3TaggerGUI
         readonly System.Windows.Forms.Timer _uiFlushTimer = new() { Interval = 200 };
         int _pendingStepIncrements;
 
+        private void SafeBeginInvoke(Action action)
+        {
+            try
+            {
+                if (IsDisposed || !IsHandleCreated) return;
+                BeginInvoke(action);
+            }
+            catch (ObjectDisposedException) { /* okno zamknięto */ }
+            catch (InvalidOperationException) { /* uchwyt zniknął między sprawdzeniem a BeginInvoke */ }
+        }
+
         public MainForm()
         {
             SettingsPath = Path.Combine(SettingsDir, "user-settings.json");
@@ -95,7 +106,6 @@ namespace Mp3TaggerGUI
             var lblSource = new Label { Text = "Źródło danych:", AutoSize = true, Left = 12, Top = 52, ForeColor = Color.FromArgb(45, 45, 48) };
             cmbSource.Left = 130; cmbSource.Top = 49;
             var lblJson = new Label { Text = "Plik JSON (baza):", AutoSize = true, Left = 368, Top = 52, ForeColor = Color.FromArgb(45, 45, 48) };
-            txtJson.Left = 130; txtJson.Top = 49; txtJson.Width = 938;
             txtJson.Left = 480; txtJson.Top = 49; txtJson.Width = 588;
             btnBrowseJson.Left = 1078; btnBrowseJson.Top = 46;
 
@@ -428,14 +438,14 @@ namespace Mp3TaggerGUI
             $"Zaktualizowano: {result.Updated} | Bez zmian: {result.Unchanged} | Brak w bazie: {result.Missing} | Błędy: {result.Errors} | Razem: {result.Total}" +
             (string.IsNullOrEmpty(result.CsvPath) ? "" : $" | Raport: {result.CsvPath}");
 
-        private static (int totalFiles, long totalBytes) PreScanMp3(string root)
+        private static (List<string> files, long totalBytes) PreScanAudio(string root)
         {
-            int count = 0;
+            var files = new List<string>();
             long bytes = 0;
 
-            foreach (var path in Directory.EnumerateFiles(root, "*.mp3", SearchOption.AllDirectories))
+            foreach (var path in TaggingLogic.EnumerateAudioFiles(root))
             {
-                count++;
+                files.Add(path);
                 try
                 {
                     bytes += new FileInfo(path).Length;
@@ -446,7 +456,7 @@ namespace Mp3TaggerGUI
                 }
             }
 
-            return (count, bytes);
+            return (files, bytes);
         }
 
         private GridEditorForm EnsureGridForm()
@@ -483,15 +493,16 @@ namespace Mp3TaggerGUI
             if (!TryGetValidatedInputs(out var mp3, out var json)) return;
 
             UseWaitCursor = true;
-            var (scanCount, scanBytes) = await Task.Run(() => PreScanMp3(mp3));
+            var (scannedFiles, scanBytes) = await Task.Run(() => PreScanAudio(mp3));
             UseWaitCursor = false;
+            var scanCount = scannedFiles.Count;
 
             var scanSizeGb = scanBytes / (1024d * 1024d * 1024d);
             if (scanCount >= 5000)
             {
                 var ask = MessageBox.Show(
                     this,
-                    $"Wykryto {scanCount:N0} plików MP3 (~{scanSizeGb:F2} GB). Operacja może potrwać długo. Kontynuować?",
+                    $"Wykryto {scanCount:N0} plików audio (~{scanSizeGb:F2} GB). Operacja może potrwać długo. Kontynuować?",
                     "Duży wolumen plików",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Information);
@@ -514,10 +525,11 @@ namespace Mp3TaggerGUI
             {
                 var result = await Task.Run(() =>
                     TaggingLogic.Process(mp3, json, opts,
-                        onTotal: total => BeginInvoke(new Action(() => HandleTotal(total))),
+                        onTotal: total => SafeBeginInvoke(() => HandleTotal(total)),
                         onStep: EnqueueStep,
                         onLog: EnqueueLog,
-                        cancellationToken: _runCts.Token),
+                        cancellationToken: _runCts.Token,
+                        preScannedFiles: scannedFiles),
                     _runCts.Token
                 );
 
@@ -561,7 +573,7 @@ namespace Mp3TaggerGUI
                 Log("INFO: Wczytuję pliki do GRID...");
                 var rows = await Task.Run(() =>
                     TaggingLogic.LoadGridRows(mp3, json, opts,
-                        onTotal: total => BeginInvoke(new Action(() => HandleTotal(total))),
+                        onTotal: total => SafeBeginInvoke(() => HandleTotal(total)),
                         onStep: EnqueueStep,
                         onLog: EnqueueLog,
                         cancellationToken: _runCts.Token),
@@ -628,15 +640,17 @@ namespace Mp3TaggerGUI
             try
             {
                 Log($"INFO: Zapisuję GRID. Wierszy zaznaczonych: {selected}");
+                var rowsToSave = _gridRows.Where(r => r.Apply).Select(CloneGridRow).ToList();
                 var result = await Task.Run(() =>
-                    TaggingLogic.ApplyGridRows(mp3, _gridRows.ToList(), opts,
-                        onTotal: total => BeginInvoke(new Action(() => HandleTotal(total))),
+                    TaggingLogic.ApplyGridRows(mp3, rowsToSave, opts,
+                        onTotal: total => SafeBeginInvoke(() => HandleTotal(total)),
                         onStep: EnqueueStep,
                         onLog: EnqueueLog,
                         cancellationToken: _runCts.Token),
                     _runCts.Token);
 
                 FlushUiBatches();
+                ApplyGridSaveResults(rowsToSave);
                 _gridForm?.RefreshRows();
                 lblCounts.Text = BuildSummaryText(result);
             }
@@ -660,6 +674,64 @@ namespace Mp3TaggerGUI
                 _runCts = null;
                 ToggleForRun(false);
                 SaveUiSettings();
+            }
+        }
+
+        private static TagEditRow CloneGridRow(TagEditRow row) => new()
+        {
+            Apply = row.Apply,
+            IsDjoid = row.IsDjoid,
+            FilePath = row.FilePath,
+            FileName = row.FileName,
+            Artist = row.Artist,
+            Title = row.Title,
+            Version = row.Version,
+            CurrentAlbum = row.CurrentAlbum,
+            Album = row.Album,
+            CurrentYear = row.CurrentYear,
+            Year = row.Year,
+            CurrentTrack = row.CurrentTrack,
+            Track = row.Track,
+            CurrentBpm = row.CurrentBpm,
+            Bpm = row.Bpm,
+            CurrentKey = row.CurrentKey,
+            Key = row.Key,
+            CurrentComment = row.CurrentComment,
+            Comment = row.Comment,
+            CurrentGenre = row.CurrentGenre,
+            CurrentLabel = row.CurrentLabel,
+            Genre = row.Genre,
+            Label = row.Label,
+            DjoidGenre = row.DjoidGenre,
+            DjoidSubgenre = row.DjoidSubgenre,
+            DjoidEnergy = row.DjoidEnergy,
+            DjoidDanceability = row.DjoidDanceability,
+            DjoidEmotion = row.DjoidEmotion,
+            DjoidKey = row.DjoidKey,
+            DjoidBpm = row.DjoidBpm,
+            Status = row.Status
+        };
+
+        private void ApplyGridSaveResults(IReadOnlyCollection<TagEditRow> savedRows)
+        {
+            var byPath = savedRows
+                .GroupBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Last(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var row in _gridRows)
+            {
+                if (!byPath.TryGetValue(row.FilePath, out var saved))
+                    continue;
+
+                row.Status = saved.Status;
+                row.CurrentGenre = saved.CurrentGenre;
+                row.CurrentLabel = saved.CurrentLabel;
+                row.CurrentAlbum = saved.CurrentAlbum;
+                row.CurrentYear = saved.CurrentYear;
+                row.CurrentTrack = saved.CurrentTrack;
+                row.CurrentBpm = saved.CurrentBpm;
+                row.CurrentKey = saved.CurrentKey;
+                row.CurrentComment = saved.CurrentComment;
             }
         }
 
@@ -794,7 +866,10 @@ namespace Mp3TaggerGUI
                 SettingsCache = JsonConvert.DeserializeObject<UiSettings>(json) ?? new UiSettings();
                 ApplySettingsToUi(SettingsCache);
             }
-            catch { /* ignoruj */ }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.WriteLine($"LoadUiSettings failed: {ex}");
+            }
         }
 
         private void SaveUiSettings()
@@ -810,9 +885,19 @@ namespace Mp3TaggerGUI
                     SettingsCache.GridChangesOnly = view.changesOnly;
                     SettingsCache.GridColumnLayout = view.layout;
                 }
-                File.WriteAllText(SettingsPath, JsonConvert.SerializeObject(SettingsCache, Formatting.Indented));
+
+                var payload = JsonConvert.SerializeObject(SettingsCache, Formatting.Indented);
+                var tmpPath = SettingsPath + ".tmp";
+                File.WriteAllText(tmpPath, payload);
+                if (File.Exists(SettingsPath))
+                    File.Replace(tmpPath, SettingsPath, null);
+                else
+                    File.Move(tmpPath, SettingsPath);
             }
-            catch { /* ignoruj */ }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.WriteLine($"SaveUiSettings failed: {ex}");
+            }
         }
 
     }

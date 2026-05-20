@@ -43,6 +43,7 @@ namespace Mp3TaggerGUI
             out TrackLookupInfo info)
         {
             var baseName = Path.GetFileNameWithoutExtension(path);
+            // Usuwa sufiks identyfikatora (np. "_a1b2c3" dopinany przez serwisy promo).
             var trimmed = Regex.Replace(baseName, "_\\w{1,12}$", "");
 
             var withVersion = Regex.Match(trimmed, @"^(.*?)\s*-\s*(.*?)\s*\(([^()]*)\)\s*$");

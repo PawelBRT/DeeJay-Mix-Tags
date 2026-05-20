@@ -12,7 +12,7 @@ namespace Mp3TaggerGUI
         public TaggingCsvWriter(string path)
         {
             Path = path;
-            _sw = new StreamWriter(path, false, new UTF8Encoding(true));
+            _sw = new StreamWriter(path, false, new UTF8Encoding(true)) { AutoFlush = true };
             _sw.WriteLine("File;Status;ChangedFields;GenresBefore;GenresAfter;LabelBefore;LabelAfter;CommentBefore;CommentAfter;TxxxBefore;TxxxAfter");
         }
 

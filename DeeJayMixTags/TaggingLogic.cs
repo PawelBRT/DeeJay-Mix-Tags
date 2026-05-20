@@ -12,6 +12,12 @@ namespace Mp3TaggerGUI
 {
     public static class TaggingLogic
     {
+        public static readonly string[] SupportedExtensions = new[] { ".mp3", ".flac", ".m4a", ".ogg" };
+
+        public static IEnumerable<string> EnumerateAudioFiles(string root) =>
+            Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
+                .Where(p => SupportedExtensions.Contains(Path.GetExtension(p), StringComparer.OrdinalIgnoreCase));
+
         public sealed class Result
         {
             public int Total { get; set; }
@@ -29,9 +35,10 @@ namespace Mp3TaggerGUI
             Action<int>? onTotal = null,
             Action? onStep = null,
             Action<string>? onLog = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IEnumerable<string>? preScannedFiles = null)
         {
-            var files = Directory.EnumerateFiles(mp3Root, "*.mp3", SearchOption.AllDirectories).ToList();
+            var files = (preScannedFiles ?? EnumerateAudioFiles(mp3Root)).ToList();
             return ProcessCore(mp3Root, jsonPath, flags, files, TagLib.File.Create, onTotal, onStep, onLog, cancellationToken);
         }
 
@@ -42,9 +49,10 @@ namespace Mp3TaggerGUI
             Action<int>? onTotal = null,
             Action? onStep = null,
             Action<string>? onLog = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IEnumerable<string>? preScannedFiles = null)
         {
-            var files = Directory.EnumerateFiles(mp3Root, "*.mp3", SearchOption.AllDirectories).ToList();
+            var files = (preScannedFiles ?? EnumerateAudioFiles(mp3Root)).ToList();
             return LoadGridRowsCore(jsonPath, flags, files, TagLib.File.Create, onTotal, onStep, onLog, cancellationToken);
         }
 
@@ -208,9 +216,9 @@ namespace Mp3TaggerGUI
 
             try
             {
-                csv = flags.WriteCsvReport ? new TaggingCsvWriter(Path.Combine(reportRoot, "_tagger_grid_report.csv")) : null;
+                csv = flags.WriteCsvReport ? new TaggingCsvWriter(ResolveReportPath(reportRoot, "_tagger_grid_report.csv", onLog)) : null;
                 backup = (!flags.DryRun && flags.WritePerFileBackup)
-                    ? new TaggingBackupWriter(Path.Combine(reportRoot, $"_tagger_grid_backup_{DateTime.Now:yyyyMMdd_HHmmss}.json"))
+                    ? new TaggingBackupWriter(ResolveReportPath(reportRoot, $"_tagger_grid_backup_{DateTime.Now:yyyyMMdd_HHmmss}.json", onLog))
                     : null;
 
                 foreach (var row in rowList)
@@ -236,7 +244,8 @@ namespace Mp3TaggerGUI
                         }
 
                         var targetAlbum = row.Album?.Trim() ?? "";
-                        if (!string.Equals((file.Tag.Album ?? ""), targetAlbum, StringComparison.Ordinal))
+                        var albumEdited = !string.Equals(row.CurrentAlbum ?? "", row.Album ?? "", StringComparison.Ordinal);
+                        if (albumEdited && !string.Equals((file.Tag.Album ?? ""), targetAlbum, StringComparison.Ordinal))
                         {
                             if (!flags.DryRun)
                                 file.Tag.Album = targetAlbum;
@@ -343,12 +352,14 @@ namespace Mp3TaggerGUI
                         }
 
                         var kind = changed ? ChangeKind.Updated : ChangeKind.Unchanged;
+                        var snapshotTxxx = TaggingApplier.SnapshotTxxx(id3v2);
                         if (changed)
                         {
                             if (!flags.DryRun)
                                 file.Save();
                             res.Updated++;
                             row.Status = flags.DryRun ? "Dry run" : "Zapisano";
+                            var appliedComment = targetComment ?? "";
                             backup?.WriteRow(TaggingApplier.CreateRecord(
                                 ChangeKind.Updated,
                                 beforeGenres,
@@ -356,10 +367,10 @@ namespace Mp3TaggerGUI
                                 beforeLabel,
                                 afterLabel,
                                 beforeComment,
-                                targetComment ?? "",
+                                appliedComment,
                                 beforeTxxx,
-                                TaggingApplier.SnapshotTxxx(id3v2),
-                                BuildChangedFields(beforeGenres, afterGenres, beforeLabel, afterLabel, beforeComment, targetComment ?? "", beforeTxxx, TaggingApplier.SnapshotTxxx(id3v2))),
+                                snapshotTxxx,
+                                BuildChangedFields(beforeGenres, afterGenres, beforeLabel, afterLabel, beforeComment, appliedComment, beforeTxxx, snapshotTxxx)),
                                 row.FilePath);
                         }
                         else
@@ -376,7 +387,7 @@ namespace Mp3TaggerGUI
                         row.CurrentBpm = file.Tag.BeatsPerMinute == 0 ? "" : file.Tag.BeatsPerMinute.ToString();
                         row.CurrentKey = file.Tag.InitialKey ?? "";
                         row.CurrentComment = file.Tag.Comment ?? "";
-                        var afterTxxx = TaggingApplier.SnapshotTxxx(id3v2);
+                        var afterTxxx = snapshotTxxx;
                         if (flags.DryRun && txxxChanged && string.Equals(beforeTxxx, afterTxxx, StringComparison.Ordinal))
                             afterTxxx = string.IsNullOrWhiteSpace(beforeTxxx) ? "(planowane zmiany TXXX)" : $"{beforeTxxx}{TaggingText.Sep}(planowane zmiany TXXX)";
                         var finalComment = flags.DryRun ? targetComment ?? "" : file.Tag.Comment ?? "";
@@ -416,7 +427,10 @@ namespace Mp3TaggerGUI
                         csv.Dispose();
                         onLog?.Invoke($"Raport CSV: {csv.Path}");
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        onLog?.Invoke($"WARN: nie udało się zamknąć raportu CSV: {ex.Message}");
+                    }
                 }
 
                 if (backup != null)
@@ -426,7 +440,10 @@ namespace Mp3TaggerGUI
                         backup.Dispose();
                         onLog?.Invoke($"Backup sesji: {backup.Path}");
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        onLog?.Invoke($"WARN: nie udało się zamknąć backupu sesji: {ex.Message}");
+                    }
                 }
             }
         }
@@ -454,9 +471,9 @@ namespace Mp3TaggerGUI
 
             try
             {
-                csv = flags.WriteCsvReport ? new TaggingCsvWriter(Path.Combine(reportRoot, "_tagger_report.csv")) : null;
+                csv = flags.WriteCsvReport ? new TaggingCsvWriter(ResolveReportPath(reportRoot, "_tagger_report.csv", onLog)) : null;
                 backup = (!flags.DryRun && flags.WritePerFileBackup)
-                    ? new TaggingBackupWriter(Path.Combine(reportRoot, $"_tagger_backup_{DateTime.Now:yyyyMMdd_HHmmss}.json"))
+                    ? new TaggingBackupWriter(ResolveReportPath(reportRoot, $"_tagger_backup_{DateTime.Now:yyyyMMdd_HHmmss}.json", onLog))
                     : null;
 
                 foreach (var path in fileList)
@@ -506,7 +523,10 @@ namespace Mp3TaggerGUI
                         csv.Dispose();
                         onLog?.Invoke($"Raport CSV: {csv.Path}");
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        onLog?.Invoke($"WARN: nie udało się zamknąć raportu CSV: {ex.Message}");
+                    }
                 }
 
                 if (backup != null)
@@ -516,8 +536,36 @@ namespace Mp3TaggerGUI
                         backup.Dispose();
                         onLog?.Invoke($"Backup sesji: {backup.Path}");
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        onLog?.Invoke($"WARN: nie udało się zamknąć backupu sesji: {ex.Message}");
+                    }
                 }
+            }
+        }
+
+        internal class DatabaseLoadException : Exception
+        {
+            public DatabaseLoadException(string message, Exception inner) : base(message, inner) { }
+        }
+
+        private static string ResolveReportPath(string reportRoot, string fileName, Action<string>? onLog)
+        {
+            var primary = Path.Combine(reportRoot, fileName);
+            try
+            {
+                Directory.CreateDirectory(reportRoot);
+                using (var fs = IOFile.Open(primary, FileMode.Create, FileAccess.Write, FileShare.Read))
+                {
+                }
+                IOFile.Delete(primary);
+                return primary;
+            }
+            catch (Exception ex)
+            {
+                var fallback = Path.Combine(Path.GetTempPath(), fileName);
+                onLog?.Invoke($"WARN: nie można pisać do {primary} ({ex.Message}). Raport zapisuję w {fallback}.");
+                return fallback;
             }
         }
 
@@ -526,8 +574,24 @@ namespace Mp3TaggerGUI
             if (string.IsNullOrWhiteSpace(jsonPath) || !IOFile.Exists(jsonPath))
                 return new();
 
-            var text = IOFile.ReadAllText(jsonPath);
-            var arr = JArray.Parse(text);
+            string text;
+            JArray arr;
+            try
+            {
+                text = IOFile.ReadAllText(jsonPath);
+            }
+            catch (Exception ex)
+            {
+                throw new DatabaseLoadException($"Nie można odczytać pliku JSON ({jsonPath}): {ex.Message}", ex);
+            }
+            try
+            {
+                arr = JArray.Parse(text);
+            }
+            catch (Exception ex)
+            {
+                throw new DatabaseLoadException($"Plik JSON jest niepoprawny ({jsonPath}): {ex.Message}", ex);
+            }
             var map = new Dictionary<(string, string, string), TrackLookupInfo>();
 
             if (flags.DataSource == TagDataSource.DjoidJson)

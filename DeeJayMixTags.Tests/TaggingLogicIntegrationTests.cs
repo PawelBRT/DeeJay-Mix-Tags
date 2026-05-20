@@ -686,6 +686,106 @@ public class TaggingLogicIntegrationTests
     }
 
     [Fact]
+    public void ApplyGridRowsCore_WithEmptyAlbumButNoKnownEdit_DoesNotClearExistingAlbum()
+    {
+        var root = CreateTempDirectory();
+        var filePath = Path.Combine(root, "Artist - Song.mp3");
+        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+        try
+        {
+            var options = new TaggingOptions
+            {
+                DoGenre = false,
+                DoLabel = false,
+                DryRun = false,
+                WriteCsvReport = false,
+                WritePerFileBackup = false
+            };
+
+            var row = new TagEditRow
+            {
+                Apply = true,
+                FilePath = filePath,
+                FileName = "Artist - Song.mp3",
+                CurrentAlbum = "",
+                Album = ""
+            };
+
+            FakeTagFile? fake = null;
+            var result = TaggingLogic.ApplyGridRowsCore(
+                reportRoot: root,
+                rows: new[] { row },
+                flags: options,
+                fileFactory: _ =>
+                {
+                    fake = new FakeTagFile("Artist", "Song", "", genres: "Old", publisher: "OldLabel");
+                    fake.Tag.Album = "Existing Album";
+                    return fake;
+                });
+
+            Assert.Equal(1, result.Unchanged);
+            Assert.NotNull(fake);
+            Assert.Equal("Existing Album", fake!.Tag.Album);
+            Assert.Equal(0, fake.SaveCount);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void ApplyGridRowsCore_WithAlbumClearedByUser_ClearsExistingAlbum()
+    {
+        var root = CreateTempDirectory();
+        var filePath = Path.Combine(root, "Artist - Song.mp3");
+        IOFile.WriteAllBytes(filePath, new byte[] { 0x00 });
+
+        try
+        {
+            var options = new TaggingOptions
+            {
+                DoGenre = false,
+                DoLabel = false,
+                DryRun = false,
+                WriteCsvReport = false,
+                WritePerFileBackup = false
+            };
+
+            var row = new TagEditRow
+            {
+                Apply = true,
+                FilePath = filePath,
+                FileName = "Artist - Song.mp3",
+                CurrentAlbum = "Existing Album",
+                Album = ""
+            };
+
+            FakeTagFile? fake = null;
+            var result = TaggingLogic.ApplyGridRowsCore(
+                reportRoot: root,
+                rows: new[] { row },
+                flags: options,
+                fileFactory: _ =>
+                {
+                    fake = new FakeTagFile("Artist", "Song", "", genres: "Old", publisher: "OldLabel");
+                    fake.Tag.Album = "Existing Album";
+                    return fake;
+                });
+
+            Assert.Equal(1, result.Updated);
+            Assert.NotNull(fake);
+            Assert.Equal("", fake!.Tag.Album);
+            Assert.Equal(1, fake.SaveCount);
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
     public void ProcessCore_DjoidSource_WithGenreModeConfigured_UpdatesGenreEvenWhenDoGenreFalse()
     {
         var root = CreateTempDirectory();
